@@ -100,11 +100,20 @@ export function ChaosInjector({
           <button
             type="button"
             disabled={busy}
-            onClick={() => onEvaluate('BADS')}
+            onClick={() => onEvaluate('BADEV')}
             className={`${ACTION_BUTTON} border-rose/30 bg-rose/[0.07] text-rose hover:border-rose/60 hover:bg-rose/[0.12]`}
           >
-            <span className="mr-2">◉</span>MALFORMED payload
-            <span className="ml-1 text-rose/60">(strips is_honeypot / error)</span>
+            <span className="mr-2">◉</span>MALFORMED envelope
+            <span className="ml-1 text-rose/60">(drops data_mode)</span>
+          </button>
+          <button
+            type="button"
+            disabled={busy}
+            onClick={() => onEvaluate('SIMUL')}
+            className={`${ACTION_BUTTON} border-rose/30 bg-rose/[0.07] text-rose hover:border-rose/60 hover:bg-rose/[0.12]`}
+          >
+            <span className="mr-2">◉</span>SIMULATED data
+            <span className="ml-1 text-rose/60">(data_mode !== live)</span>
           </button>
         </div>
 

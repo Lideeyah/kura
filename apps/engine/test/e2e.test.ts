@@ -121,12 +121,12 @@ afterAll(async () => {
 });
 
 describe('live transport', () => {
-  it('connects to the MCP peer and discovers all 7 tools', async () => {
+  it('connects to the MCP peer and discovers all 6 tools', async () => {
     const tools = await sup.client.listTools();
     expect(tools.sort()).toEqual(
       [
-        'analyze_token', 'check_safety', 'compare_tokens', 'deep_analysis',
-        'market_overview', 'scan_market', 'supported_tokens',
+        'analyze_token', 'compare_tokens', 'deep_analysis',
+        'market_overview', 'monitor_market_sentiment_shift', 'scan_market',
       ].sort(),
     );
   });
@@ -138,9 +138,16 @@ describe('live transport', () => {
   });
 
   it('pulses every tool through the interceptor and out to the stream', async () => {
+    // The default heartbeat uses the free /health endpoint; the full sweep across the
+    // metered tools is opt-in, and this is the test that opts in.
+    const { config } = await import('../src/config.js');
+    (config.telemetry as { pulseSweepTools: number }).pulseSweepTools = 1;
     await sup.pulseAll();
-    const tools = new Set(tap.of('tool_pulse').map((p: any) => p.pulse.tool));
-    expect(tools.size).toBe(7);
+    // pulseAll resolving only means the calls completed; the frames still have to
+    // cross the SSE socket and be parsed, so wait for delivery rather than racing it.
+    const uniqueTools = () => new Set(tap.of('tool_pulse').map((p: any) => p.pulse.tool));
+    await tap.waitFor(() => uniqueTools().size === 6);
+    expect(uniqueTools().size).toBe(6);
   });
 });
 
@@ -154,20 +161,33 @@ describe('happy path', () => {
   });
 
   it('changes the outcome based on the data, not on a fixed script', async () => {
-    const bonk = await post('/api/evaluate', { symbol: 'BONK' }).then(jsonOf);
-    expect(bonk.verdict.decision).toBe('VETOED');
-    expect(bonk.verdict.failedInvariant).toBe('LIQUIDITY');
-    expect(bonk.record.position_usd).toBe(0);
+    const cases: Array<[string, string]> = [
+      ['STALE', 'FRESHNESS'],
+      ['PARTL', 'ORACLE'],
+      ['SIMUL', 'PROVENANCE'],
+      ['NOEVD', 'EVIDENCE'],
+    ];
+    for (const [symbol, gate] of cases) {
+      const res = await post('/api/evaluate', { symbol }).then(jsonOf);
+      expect(res.verdict.decision).toBe('VETOED');
+      expect(res.verdict.failedInvariant).toBe(gate);
+      expect(res.record.position_usd).toBe(0);
+    }
+  });
 
-    const hnyp = await post('/api/evaluate', { symbol: 'HNYP' }).then(jsonOf);
-    expect(hnyp.verdict.failedInvariant).toBe('HONEYPOT');
+  it('sizes differently for different evidence rather than emitting a constant', async () => {
+    const sol = await post('/api/evaluate', { symbol: 'SOL' }).then(jsonOf);
+    const avax = await post('/api/evaluate', { symbol: 'AVAX' }).then(jsonOf);
+    expect(sol.verdict.decision).toBe('APPROVED');
+    expect(avax.verdict.decision).toBe('APPROVED');
+    expect(sol.verdict.sizing.positionUsd).not.toBe(avax.verdict.sizing.positionUsd);
   });
 
   it('raises SCHEMA_MISMATCH_OR_MISSING_FIELD on a contract-breaking payload', async () => {
-    const res = await post('/api/evaluate', { symbol: 'BADS' }).then(jsonOf);
+    const res = await post('/api/evaluate', { symbol: 'BADEV' }).then(jsonOf);
     expect(res.verdict.decision).toBe('VETOED');
     expect(res.verdict.reason).toContain('SCHEMA_MISMATCH_OR_MISSING_FIELD');
-    expect(res.verdict.failedInvariant).toBe('ORACLE');
+    expect(res.verdict.failedInvariant).toBe('FRESHNESS');
   });
 });
 
@@ -177,14 +197,14 @@ describe('chaos: a dropped tool vetoes, commits to SQLite, and streams', () => {
       .prepare('SELECT COUNT(*) AS n FROM ledger')
       .get() as { n: number };
 
-    const toggled = await post('/api/chaos/toggle', { tool: 'check_safety', action: 'DROP' }).then(jsonOf);
-    expect(toggled.chaos).toEqual([{ tool: 'check_safety', action: 'DROP' }]);
+    const toggled = await post('/api/chaos/toggle', { tool: 'analyze_token', action: 'DROP' }).then(jsonOf);
+    expect(toggled.chaos).toEqual([{ tool: 'analyze_token', action: 'DROP' }]);
 
     const res = await post('/api/evaluate', { symbol: 'SOL' }).then(jsonOf);
 
     // (a) the arbiter vetoed, deterministically and without an LLM in the path
     expect(res.verdict.decision).toBe('VETOED');
-    expect(res.verdict.failedInvariant).toBe('ORACLE');
+    expect(res.verdict.failedInvariant).toBe('FRESHNESS');
     expect(res.verdict.reason).toContain('TRANSPORT_DROPPED');
     expect(res.verdict.sizing).toBeNull();
     expect(res.verdict.evaluationMicros).toBeLessThan(1000);
@@ -211,7 +231,7 @@ describe('chaos: a dropped tool vetoes, commits to SQLite, and streams', () => {
     );
     expect(verdictEvent.data.verdict.decision).toBe('VETOED');
     const pulse = tap.of('tool_pulse').find((p: any) => p.pulse.status === 'DROPPED');
-    expect(pulse.pulse.tool).toBe('check_safety');
+    expect(pulse.pulse.tool).toBe('analyze_token');
 
     // and the committed block verifies cryptographically
     const verified = await post('/api/verify', { receipt_id: res.record.receipt_id }).then(jsonOf);
@@ -230,14 +250,14 @@ describe('chaos: a dropped tool vetoes, commits to SQLite, and streams', () => {
     await post('/api/chaos/toggle', { tool: 'analyze_token', action: 'DELAY', delayMs: 1400 });
     const res = await post('/api/evaluate', { symbol: 'SOL' }).then(jsonOf);
     expect(res.verdict.decision).toBe('VETOED');
-    expect(res.verdict.failedInvariant).toBe('LATENCY');
+    expect(res.verdict.failedInvariant).toBe('FRESHNESS');
     expect(res.verdict.latencyMs).toBeGreaterThan(1200);
     expect(res.verdict.invariants.filter((i: any) => i.state === 'NOT_EVALUATED')).toHaveLength(3);
     await post('/api/chaos/toggle', { tool: '*', action: 'RESET' });
   });
 
   it('rejects malformed chaos instructions instead of silently ignoring them', async () => {
-    expect((await post('/api/chaos/toggle', { tool: 'nope', action: 'DROP' })).status).toBe(400);
+    expect((await post('/api/chaos/toggle', { tool: 'check_safety', action: 'DROP' })).status).toBe(400);
     expect((await post('/api/chaos/toggle', { tool: '*', action: 'EXPLODE' })).status).toBe(400);
     expect((await post('/api/chaos/toggle', { tool: '*', action: 'DELAY' })).status).toBe(400);
   });

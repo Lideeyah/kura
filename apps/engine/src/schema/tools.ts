@@ -1,15 +1,21 @@
 import { z } from 'zod';
 
 /**
- * Data contract for the 7 live RYO-CHAN tools.
+ * Data contract for the six live RYO-CHAN research tools.
+ *
+ * Source of truth: the RYO Builder MCP Guide (13 Aug 2026) and the authenticated
+ * catalog at `GET /api/mcp/tools`, which the guide names as final if the two ever
+ * differ. The unauthenticated health endpoint reports `"tools": 6`.
  *
  * Rules enforced here, deliberately:
- *  - No `.default()`, no `.catch()`, no `.coerce`. A missing or mistyped field is a
- *    hard failure, never a silently substituted zero.
- *  - Invariant-critical fields (`liquidity_usd`, `is_honeypot`, `error`) are required
- *    and exactly typed. The arbiter is never handed an inferred value.
- *  - Unknown *extra* keys are passed through, so an upstream additive change does not
- *    take the engine down. Only missing/mistyped required fields are fatal.
+ *  - No `.default()`, no `.catch()`, no `.coerce`. The guide is explicit: "Never
+ *    convert an unavailable or null measurement to zero." A missing measurement is a
+ *    hard failure that the arbiter sees, never a silently substituted zero.
+ *  - The *envelope* is validated strictly, because it is the part of the contract RYO
+ *    publishes and guarantees. Tool-specific `data` is passed through, because its
+ *    inner shape is owned by the live catalog and varies per tool.
+ *  - Every invariant the arbiter evaluates reads envelope fields only, so the gate
+ *    logic rests on the documented public contract rather than on inferred internals.
  */
 
 export const TOOL_NAMES = [
@@ -18,122 +24,63 @@ export const TOOL_NAMES = [
   'analyze_token',
   'deep_analysis',
   'compare_tokens',
-  'check_safety',
-  'supported_tokens',
+  'monitor_market_sentiment_shift',
 ] as const;
 
 export type ToolName = (typeof TOOL_NAMES)[number];
 
-const finite = z.number().finite();
-const nonNegative = finite.min(0);
-const isoTimestamp = z.string().min(1);
+/** `ok` all primary evidence present · `partial` gaps · `unavailable` not enough. */
+export const StatusSchema = z.enum(['ok', 'partial', 'unavailable']);
+export type RyoStatus = z.infer<typeof StatusSchema>;
 
-const TokenRef = z
-  .object({
-    symbol: z.string().min(1),
-    address: z.string().min(1),
-    chain: z.string().min(1),
-  })
-  .passthrough();
-
-/** Market fields the liquidity invariant reads. Required, non-negative, never defaulted. */
-const MarketCore = z.object({
-  symbol: z.string().min(1),
-  address: z.string().min(1),
-  price_usd: nonNegative,
-  liquidity_usd: nonNegative,
-  volume_24h_usd: nonNegative,
-  price_change_24h: finite,
-});
-
-export const MarketOverviewSchema = z
-  .object({
-    total_market_cap_usd: nonNegative,
-    total_volume_24h_usd: nonNegative,
-    btc_dominance: finite.min(0).max(100),
-    sentiment: z.enum(['BULLISH', 'BEARISH', 'NEUTRAL']),
-    updated_at: isoTimestamp,
-  })
-  .passthrough();
-
-export const ScanMarketSchema = z
-  .object({
-    results: z.array(MarketCore.passthrough()),
-    scanned_at: isoTimestamp,
-  })
-  .passthrough();
-
-export const AnalyzeTokenSchema = MarketCore.extend({
-  market_cap_usd: nonNegative,
-  holders: z.number().int().min(0),
-}).passthrough();
-
-export const DeepAnalysisSchema = MarketCore.extend({
-  holder_concentration_top10: finite.min(0).max(1),
-  liquidity_locked_pct: finite.min(0).max(1),
-  contract_verified: z.boolean(),
-  risk_flags: z.array(z.string()),
-}).passthrough();
-
-export const CompareTokensSchema = z
-  .object({
-    tokens: z.array(AnalyzeTokenSchema).min(1),
-    winner: z.string().min(1),
-  })
-  .passthrough();
+/** Provenance of the measurements behind this result. */
+export const DataModeSchema = z.enum(['live', 'mixed', 'simulated', 'unknown']);
+export type RyoDataMode = z.infer<typeof DataModeSchema>;
 
 /**
- * The safety oracle. `is_honeypot` MUST be a boolean and `error` MUST be present as
- * either a string or an explicit null — an absent `error` key is a schema violation,
- * because "absent" and "no error" are not the same claim.
+ * The public builder envelope. Every successful call carries these top-level fields.
+ * `data` is where tool-specific structured evidence lives; `summary` is for display and
+ * is explicitly not a substitute for structured fields.
  */
-export const CheckSafetySchema = z
+export const EnvelopeSchema = z
   .object({
-    symbol: z.string().min(1),
-    address: z.string().min(1),
-    is_honeypot: z.boolean(),
-    can_sell: z.boolean(),
-    score: finite.min(0).max(100),
-    buy_tax_bps: z.number().int().min(0),
-    sell_tax_bps: z.number().int().min(0),
-    error: z.string().min(1).nullable(),
+    schema_version: z.string().min(1),
+    tool: z.string().min(1),
+    status: StatusSchema,
+    data_mode: DataModeSchema,
+    as_of: z.string().min(1),
+    request: z.record(z.unknown()),
+    data: z.record(z.unknown()),
+    summary: z.record(z.unknown()),
+    availability: z.record(z.unknown()),
+    warnings: z.array(z.string()),
   })
   .passthrough();
 
-export const SupportedTokensSchema = z
-  .object({
-    tokens: z.array(TokenRef),
-    count: z.number().int().min(0),
-  })
-  .passthrough();
+export type RyoEnvelope = z.infer<typeof EnvelopeSchema>;
 
-export const TOOL_SCHEMAS = {
-  market_overview: MarketOverviewSchema,
-  scan_market: ScanMarketSchema,
-  analyze_token: AnalyzeTokenSchema,
-  deep_analysis: DeepAnalysisSchema,
-  compare_tokens: CompareTokensSchema,
-  check_safety: CheckSafetySchema,
-  supported_tokens: SupportedTokensSchema,
+/** Input schemas, mirroring the documented arguments for each tool. */
+export const TOOL_INPUTS = {
+  market_overview: z.object({}).strict(),
+  scan_market: z
+    .object({
+      chain: z.string().min(1).optional(),
+      theme: z.string().min(1).optional(),
+      top_n: z.number().int().min(1).max(50).optional(),
+    })
+    .strict(),
+  analyze_token: z.object({ symbol: z.string().min(1) }).strict(),
+  deep_analysis: z
+    .object({ symbol: z.string().min(1), include_perp: z.boolean().optional() })
+    .strict(),
+  // Two to four distinct symbols as ONE comma- or space-separated string, not an array.
+  compare_tokens: z
+    .object({ symbols: z.string().min(1), intent: z.enum(['swing', 'hold', 'spot']).optional() })
+    .strict(),
+  monitor_market_sentiment_shift: z
+    .object({ time_window: z.literal('7d').optional() })
+    .strict(),
 } satisfies Record<ToolName, z.ZodTypeAny>;
-
-export type MarketOverview = z.infer<typeof MarketOverviewSchema>;
-export type ScanMarket = z.infer<typeof ScanMarketSchema>;
-export type AnalyzeToken = z.infer<typeof AnalyzeTokenSchema>;
-export type DeepAnalysis = z.infer<typeof DeepAnalysisSchema>;
-export type CompareTokens = z.infer<typeof CompareTokensSchema>;
-export type CheckSafety = z.infer<typeof CheckSafetySchema>;
-export type SupportedTokens = z.infer<typeof SupportedTokensSchema>;
-
-export type ToolPayload = {
-  market_overview: MarketOverview;
-  scan_market: ScanMarket;
-  analyze_token: AnalyzeToken;
-  deep_analysis: DeepAnalysis;
-  compare_tokens: CompareTokens;
-  check_safety: CheckSafety;
-  supported_tokens: SupportedTokens;
-};
 
 export type SchemaIssue = {
   path: string;
@@ -144,17 +91,16 @@ export type SchemaIssue = {
 };
 
 /**
- * Structured, catchable representation of a contract break. This is the event the
- * spec calls SCHEMA_MISMATCH_OR_MISSING_FIELD — thrown, never swallowed, never
- * replaced by a default.
+ * Structured, catchable representation of a contract break — the event the spec calls
+ * SCHEMA_MISMATCH_OR_MISSING_FIELD. Thrown, never swallowed, never defaulted away.
  */
 export class SchemaMismatchError extends Error {
   readonly code = 'SCHEMA_MISMATCH_OR_MISSING_FIELD' as const;
-  readonly tool: ToolName;
+  readonly tool: string;
   readonly issues: SchemaIssue[];
   readonly rawPayload: unknown;
 
-  constructor(tool: ToolName, issues: SchemaIssue[], rawPayload: unknown) {
+  constructor(tool: string, issues: SchemaIssue[], rawPayload: unknown) {
     const summary = issues
       .map((i) => `${i.path || '<root>'}: ${i.message} (expected ${i.expected}, received ${i.received})`)
       .join('; ');
@@ -182,15 +128,42 @@ function toIssue(issue: z.ZodIssue): SchemaIssue {
 }
 
 /** Runtime gate. Every payload crosses this boundary before any invariant reads it. */
-export function validateToolPayload<T extends ToolName>(tool: T, raw: unknown): ToolPayload[T] {
-  const schema = TOOL_SCHEMAS[tool];
-  const result = schema.safeParse(raw);
+export function validateEnvelope(tool: string, raw: unknown): RyoEnvelope {
+  const result = EnvelopeSchema.safeParse(raw);
   if (!result.success) {
     throw new SchemaMismatchError(tool, result.error.issues.map(toIssue), raw);
   }
-  return result.data as ToolPayload[T];
+  return result.data;
 }
 
 export function isToolName(value: string): value is ToolName {
   return (TOOL_NAMES as readonly string[]).includes(value);
+}
+
+/**
+ * Age of the observation behind a result, in milliseconds. Returns null when `as_of`
+ * is not a parseable timestamp — null propagates to a veto, it is never treated as 0.
+ */
+export function asOfAgeMs(asOf: string, now = Date.now()): number | null {
+  const t = Date.parse(asOf);
+  if (Number.isNaN(t)) return null;
+  return now - t;
+}
+
+/**
+ * Fraction of declared availability sections reporting a healthy state.
+ * Returns null for an empty availability map rather than a misleading 1.0.
+ */
+export function completeness(availability: Record<string, unknown>): number | null {
+  const entries = Object.entries(availability);
+  if (entries.length === 0) return null;
+  let ok = 0;
+  for (const [, v] of entries) {
+    if (v === true || v === 'ok' || v === 'available' || v === 'complete') ok += 1;
+    else if (v && typeof v === 'object') {
+      const s = (v as { status?: unknown }).status;
+      if (s === 'ok' || s === 'available' || s === 'complete') ok += 1;
+    }
+  }
+  return ok / entries.length;
 }

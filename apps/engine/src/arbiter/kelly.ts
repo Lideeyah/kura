@@ -1,24 +1,21 @@
 import { config } from '../config.js';
-import type { AnalyzeToken, CheckSafety } from '../schema/tools.js';
+import type { SizingSignals } from './signals.js';
 
 export interface KellySizing {
-  /** Estimated win probability, derived deterministically from observable market data. */
+  /** Estimated win probability, derived deterministically from observable evidence. */
   p: number;
   /** Break-even probability 1/(1+b). Below this the edge is negative by construction. */
   pBreakEven: number;
-  /** Reward-to-risk ratio assumed by the sizing model. */
   b: number;
-  /** Full Kelly fraction, (p*b - q) / b. */
   fullKelly: number;
-  /** Full Kelly scaled by KELLY_FRACTION and clamped to the per-position ceiling. */
   fraction: number;
   positionUsd: number;
   bankrollUsd: number;
   inputs: {
-    liquidityScore: number;
-    volumeScore: number;
-    safetyScore: number;
+    volatilityScore: number;
+    completenessScore: number;
     confidence: number;
+    atrPct: number;
   };
   clampedBy: 'NONE' | 'MAX_POSITION_PCT' | 'NON_POSITIVE_EDGE';
 }
@@ -26,48 +23,42 @@ export interface KellySizing {
 const clamp01 = (n: number) => (n < 0 ? 0 : n > 1 ? 1 : n);
 
 /**
- * Log-scaled score: 0 at `floor`, 1 at `floor * span`. Anything below the floor is 0.
- * Deterministic and monotonic — the same inputs always yield the same size.
- */
-function logScore(value: number, floor: number, span: number): number {
-  if (value <= floor) return 0;
-  return clamp01(Math.log10(value / floor) / Math.log10(span));
-}
-
-/**
- * Fractional Kelly position sizing.
+ * Fractional Kelly position sizing on real RYO measurements.
  *
- * There is no model call and no randomness here. Win probability is a fixed affine
- * function of a confidence score built from three observable quantities:
+ * No model call and no randomness. Confidence is a fixed weighting of two observable
+ * quantities that RYO actually publishes:
  *
- *   liquidityScore  log-scaled depth from the liquidity floor up to 100x the floor
- *   volumeScore     log-scaled 24h volume from 10% of the floor up to 100x that
- *   safetyScore     the oracle's own 0-100 score, normalised
+ *   volatilityScore    1 at zero ATR, falling linearly to 0 at KELLY_MAX_ATR_PCT.
+ *                      A more volatile asset earns a smaller position.
+ *   completenessScore  fraction of declared availability sections reporting healthy.
+ *                      Thinner evidence earns a smaller position.
  *
- *   confidence = 0.40*safety + 0.35*liquidity + 0.25*volume
- *   pBreakEven = 1 / (1 + b)                  the p at which the edge is exactly zero
+ *   confidence = 0.60*volatility + 0.40*completeness
+ *   pBreakEven = 1 / (1 + b)               the p at which the edge is exactly zero
  *   p          = pBreakEven + (P_MAX - pBreakEven) * confidence
- *   fullKelly  = (p*b - (1-p)) / b            with b = KELLY_PAYOFF_RATIO
+ *   fullKelly  = (p*b - (1-p)) / b
  *   fraction   = min(KELLY_FRACTION * fullKelly, KELLY_MAX_POSITION_PCT), floored at 0
  *
  * Because p is anchored at break-even, confidence == 0 produces fullKelly == 0 exactly.
- * The MAX_POSITION_PCT clamp is a hard risk limit and reports itself in `clampedBy`, so
- * a saturated size is never mistaken for a computed one.
+ * The MAX_POSITION_PCT clamp is a hard risk limit and reports itself in `clampedBy`,
+ * so a saturated size is never mistaken for a computed one.
+ *
+ * `completeness` may legitimately be null (a tool that declares no availability map).
+ * That is treated as zero *confidence contribution*, not as full confidence — an
+ * unmeasured section never argues for a bigger position.
  */
-export function sizePosition(market: AnalyzeToken, safety: CheckSafety): KellySizing {
-  const { bankrollUsd, fraction: kellyFraction, payoffRatio: b, pMax, maxPositionPct } = config.kelly;
-  // Anchoring p at the break-even probability makes the model honest at the bottom:
-  // a token with no measurable edge is sized at zero, not at some residual floor.
+export function sizePosition(signals: SizingSignals): KellySizing {
+  const { bankrollUsd, fraction: kellyFraction, payoffRatio: b, pMax, maxPositionPct, maxAtrPct } =
+    config.kelly;
+
   const pMin = 1 / (1 + b);
-  const floor = config.invariants.minLiquidityUsd;
+  const volatilityScore = clamp01(1 - signals.atrPct / maxAtrPct);
+  const completenessScore = signals.completeness === null ? 0 : clamp01(signals.completeness);
 
-  const liquidityScore = logScore(market.liquidity_usd, floor, 100);
-  const volumeScore = logScore(market.volume_24h_usd, floor / 10, 100);
-  const safetyScore = clamp01(safety.score / 100);
-
-  const confidence = 0.4 * safetyScore + 0.35 * liquidityScore + 0.25 * volumeScore;
+  const confidence = 0.6 * volatilityScore + 0.4 * completenessScore;
   const p = pMin + (pMax - pMin) * confidence;
   const q = 1 - p;
+
   // (p*b - q)/b is exactly 0 at break-even in exact arithmetic, but binary floating
   // point leaves ~1e-16 of residue. Snapping that to zero keeps "no edge" reported as
   // NON_POSITIVE_EDGE rather than as an unclamped position of $0.00.
@@ -93,10 +84,10 @@ export function sizePosition(market: AnalyzeToken, safety: CheckSafety): KellySi
     positionUsd: round(bankrollUsd * fraction, 2),
     bankrollUsd,
     inputs: {
-      liquidityScore: round(liquidityScore, 6),
-      volumeScore: round(volumeScore, 6),
-      safetyScore: round(safetyScore, 6),
+      volatilityScore: round(volatilityScore, 6),
+      completenessScore: round(completenessScore, 6),
       confidence: round(confidence, 6),
+      atrPct: round(signals.atrPct, 6),
     },
     clampedBy,
   };

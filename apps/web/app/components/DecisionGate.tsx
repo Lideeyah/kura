@@ -143,7 +143,13 @@ export function DecisionGate({
         <div className="grid grid-cols-2 gap-x-6 sm:grid-cols-4">
           <Field label="Gate">{formatMicros(verdict.evaluationMicros)}</Field>
           <Field label="Upstream">{formatLatency(verdict.latencyMs)}</Field>
+          <Field label="Status">{verdict.status ?? '—'}</Field>
+          <Field label="Data mode">{verdict.dataMode ?? '—'}</Field>
+          <Field label="Observation">
+            {verdict.asOfAgeMs === null ? '—' : formatLatency(verdict.asOfAgeMs)}
+          </Field>
           <Field label="Trigger">{triggeredGate(verdict.reason, verdict.failedInvariant)}</Field>
+          <Field label="ATR">{sizing ? `${(sizing.inputs.atrPct * 100).toFixed(2)}%` : '—'}</Field>
           <Field label="p / Kelly">
             {sizing ? `${sizing.p.toFixed(3)} / ${sizing.fullKelly.toFixed(3)}` : '—'}
           </Field>

@@ -143,11 +143,17 @@ export function buildServer(sup: Supervisor) {
 
   app.get('/api/verify/chain', async () => sup.ledger.verifyChain());
 
-  app.post<{ Body: { symbol?: string; address?: string } }>('/api/evaluate', async (req, reply) => {
+  app.post<{ Body: { symbol?: string } }>('/api/evaluate', async (req, reply) => {
     const symbol = req.body?.symbol ?? sup.tokens[0]?.symbol;
     if (!symbol) return reply.code(400).send({ error: 'MISSING_SYMBOL' });
-    const outcome = await sup.evaluate({ symbol, address: req.body?.address });
+    const outcome = await sup.evaluate({ symbol });
     return { verdict: outcome.verdict, record: outcome.record };
+  });
+
+  /** The authenticated upstream catalog — the guide's final source of truth. */
+  app.get('/api/catalog', async () => {
+    const [catalog, health] = await Promise.all([sup.catalog(), sup.client.fetchHealth()]);
+    return { catalog, health, expected: TOOL_NAMES };
   });
 
   return app;

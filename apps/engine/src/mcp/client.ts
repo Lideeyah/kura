@@ -11,7 +11,7 @@ export interface RyoTransportSpec {
   url?: string;
   command?: string;
   args?: string[];
-  token?: string;
+  key?: string;
   env?: Record<string, string>;
 }
 
@@ -32,7 +32,7 @@ export function transportSpecFromConfig(): RyoTransportSpec {
       'RYO_MCP_TRANSPORT=http but RYO_MCP_URL is empty. Set it in .env — the engine will not fabricate a peer.',
     );
   }
-  return { transport: 'http', url: config.mcp.url, token: config.mcp.token };
+  return { transport: 'http', url: config.mcp.url, key: config.mcp.key };
 }
 
 function buildTransport(spec: RyoTransportSpec, mode: 'streamable' | 'sse'): Transport {
@@ -46,7 +46,7 @@ function buildTransport(spec: RyoTransportSpec, mode: 'streamable' | 'sse'): Tra
     });
   }
   const headers: Record<string, string> = {};
-  if (spec.token) headers.Authorization = `Bearer ${spec.token}`;
+  if (spec.key) headers.Authorization = `Bearer ${spec.key}`;
   const url = new URL(spec.url!);
   return mode === 'streamable'
     ? new StreamableHTTPClientTransport(url, { requestInit: { headers } })
@@ -146,6 +146,46 @@ export class RyoClient {
       signal: opts.signal,
       timeout: opts.timeoutMs ?? config.mcp.requestTimeoutMs,
     });
+  }
+
+  /**
+   * The authenticated catalog. The guide names GET /tools the final source of truth if
+   * the written contract and the deployed server ever differ, and says to read it at
+   * startup instead of hard-coding assumptions. It does not consume tool-call quota.
+   */
+  async fetchCatalog(): Promise<{ names: string[]; error: string | null }> {
+    if (this.spec.transport !== 'http' || !this.spec.url) {
+      return { names: [], error: 'catalog is only published over the HTTP transport' };
+    }
+    try {
+      const res = await fetch(`${this.spec.url.replace(/\/$/, '')}/tools`, {
+        headers: this.spec.key ? { Authorization: `Bearer ${this.spec.key}` } : {},
+      });
+      if (!res.ok) return { names: [], error: `catalog HTTP ${res.status}` };
+      const body = (await res.json()) as { tools?: Array<{ name?: string }> };
+      return { names: (body.tools ?? []).map((t) => t.name ?? '').filter(Boolean), error: null };
+    } catch (err) {
+      return { names: [], error: err instanceof Error ? err.message : String(err) };
+    }
+  }
+
+  /** Unauthenticated liveness. Costs no quota, so it is safe to poll. */
+  async fetchHealth(): Promise<{ ok: boolean; tools: number | null; detail: string }> {
+    if (this.spec.transport !== 'http' || !this.spec.url) {
+      return { ok: this._connected, tools: null, detail: 'stdio transport: no health endpoint' };
+    }
+    try {
+      const res = await fetch(`${this.spec.url.replace(/\/$/, '')}/health`);
+      if (!res.ok) return { ok: false, tools: null, detail: `health HTTP ${res.status}` };
+      const body = (await res.json()) as { status?: string; tools?: number; server?: string };
+      return {
+        ok: body.status === 'ok',
+        tools: typeof body.tools === 'number' ? body.tools : null,
+        detail: `${body.server ?? 'unknown'} status=${body.status ?? '?'}`,
+      };
+    } catch (err) {
+      return { ok: false, tools: null, detail: err instanceof Error ? err.message : String(err) };
+    }
   }
 
   /** Hard close. Used by chaos DROP to sever the live connection for real. */

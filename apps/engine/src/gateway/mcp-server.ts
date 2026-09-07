@@ -42,12 +42,13 @@ export function buildGatewayServer(sup: Supervisor): McpServer {
         'tamper-evident ledger. Returns APPROVED with a bounded position size, or VETOED with ' +
         'the invariant that failed and the empirical value it saw. Never calls a language model.',
       inputSchema: {
+        // RYO accepts asset symbols, not wallet addresses — the guide states this for
+        // both analyze_token and deep_analysis, so the gateway does not offer one.
         symbol: z.string().min(1).describe('Token symbol, e.g. SOL'),
-        address: z.string().min(1).optional().describe('Optional contract address to disambiguate'),
       },
     },
-    async ({ symbol, address }) => {
-      const { verdict, record } = await sup.evaluate({ symbol, address });
+    async ({ symbol }) => {
+      const { verdict, record } = await sup.evaluate({ symbol });
       return json({
         decision: verdict.decision,
         token: verdict.token,
@@ -69,6 +70,9 @@ export function buildGatewayServer(sup: Supervisor): McpServer {
               clamped_by: verdict.sizing.clampedBy,
             }
           : null,
+        upstream_status: verdict.status,
+        upstream_data_mode: verdict.dataMode,
+        observation_age_ms: verdict.asOfAgeMs,
         upstream_latency_ms: verdict.latencyMs,
         gate_evaluation_micros: verdict.evaluationMicros,
         receipt: {
@@ -152,10 +156,13 @@ export function buildGatewayServer(sup: Supervisor): McpServer {
     async () =>
       json({
         invariants: [
-          { id: 'LATENCY', predicate: `latencyMs <= ${config.invariants.maxLatencyMs}` },
-          { id: 'ORACLE', predicate: 'safety !== null && !safety.error' },
-          { id: 'HONEYPOT', predicate: 'safety.is_honeypot === false' },
-          { id: 'LIQUIDITY', predicate: `market.liquidity_usd >= ${config.invariants.minLiquidityUsd}` },
+          {
+            id: 'FRESHNESS',
+            predicate: `latencyMs <= ${config.invariants.maxLatencyMs} && asOfAgeMs <= ${config.invariants.maxAsOfAgeMs}`,
+          },
+          { id: 'ORACLE', predicate: "status === 'ok'" },
+          { id: 'PROVENANCE', predicate: "data_mode === 'live'" },
+          { id: 'EVIDENCE', predicate: 'price and ATR(14) both measurable' },
         ],
         sizing: {
           model: 'fractional Kelly, p anchored at break-even 1/(1+b)',
@@ -163,6 +170,7 @@ export function buildGatewayServer(sup: Supervisor): McpServer {
           kelly_fraction: config.kelly.fraction,
           payoff_ratio: config.kelly.payoffRatio,
           max_position_pct: config.kelly.maxPositionPct,
+          max_atr_pct: config.kelly.maxAtrPct,
         },
         upstream_connected: sup.connected,
         candidates: sup.tokens,

@@ -49,11 +49,14 @@ export const config = {
      *  - 'stdio' -> RYO_MCP_COMMAND + RYO_MCP_ARGS
      */
     transport: str('RYO_MCP_TRANSPORT', 'http') as TransportKind,
-    url: process.env.RYO_MCP_URL ?? '',
+    url: str('RYO_MCP_URL', 'https://app-ryochan.com/api/mcp'),
     command: process.env.RYO_MCP_COMMAND ?? '',
     args: (process.env.RYO_MCP_ARGS ?? '').split(' ').filter(Boolean),
-    /** Bearer token injected as `Authorization: Bearer <token>` on HTTP transports. */
-    token: process.env.RYO_MCP_TOKEN ?? '',
+    /**
+     * Builder credential, sent as `Authorization: Bearer <key>`.
+     * The guide names this RYO_MCP_KEY; RYO_MCP_TOKEN is accepted as a legacy alias.
+     */
+    key: process.env.RYO_MCP_KEY ?? process.env.RYO_MCP_TOKEN ?? '',
     /** Hard ceiling on a single tool call before the interceptor raises UPSTREAM_TIMEOUT. */
     requestTimeoutMs: num('RYO_REQUEST_TIMEOUT_MS', 10_000),
     /** Reconnect backoff after a transport-level failure. */
@@ -63,8 +66,10 @@ export const config = {
 
   /** Deterministic invariant thresholds. Changing these changes the arbiter's verdicts. */
   invariants: {
+    /** Round-trip ceiling for a single upstream call. */
     maxLatencyMs: num('INV_MAX_LATENCY_MS', 1_200),
-    minLiquidityUsd: num('INV_MIN_LIQUIDITY_USD', 1_000_000),
+    /** How stale the `as_of` observation may be before a result is refused. */
+    maxAsOfAgeMs: num('INV_MAX_AS_OF_AGE_MS', 300_000),
   },
 
   /** Fractional Kelly sizing parameters (see arbiter/kelly.ts for the derivation). */
@@ -78,6 +83,8 @@ export const config = {
      * zero edge and therefore exactly zero size.
      */
     pMax: num('KELLY_P_MAX', 0.55),
+    /** ATR/price at which the volatility score reaches zero. */
+    maxAtrPct: num('KELLY_MAX_ATR_PCT', 0.15),
     maxPositionPct: num('KELLY_MAX_POSITION_PCT', 0.05),
   },
 
@@ -87,13 +94,29 @@ export const config = {
   },
 
   telemetry: {
-    /** Interval between health pings across the 7 tools. */
-    pulseIntervalMs: num('PULSE_INTERVAL_MS', 5_000),
+    /**
+     * Liveness polling interval. This hits GET /health, which needs no auth and
+     * consumes no tool-call quota — the guide explicitly warns against tight polling
+     * loops over the metered tools, so per-tool latency is sampled from real
+     * evaluations instead of from a synthetic heartbeat.
+     */
+    pulseIntervalMs: num('PULSE_INTERVAL_MS', 15_000),
     /** Interval between full evaluation cycles of the watchlist. */
     evaluationIntervalMs: num('EVALUATION_INTERVAL_MS', 15_000),
     /** Set to 0 to disable the autonomous evaluation loop. */
     autoEvaluate: num('AUTO_EVALUATE', 1),
+    /** Fan the heartbeat across all six metered tools instead of the free /health. */
+    pulseSweepTools: num('PULSE_SWEEP_TOOLS', 0),
   },
+
+  /**
+   * Candidate symbols. RYO publishes no supported_tokens tool, so this is the
+   * operator's own list rather than something discovered upstream.
+   */
+  watchlist: str('KURA_WATCHLIST', 'SOL,BTC,ETH,AVAX,BNB')
+    .split(',')
+    .map((s) => s.trim().toUpperCase())
+    .filter(Boolean),
 } as const;
 
 export const GENESIS_HASH = '0'.repeat(64);

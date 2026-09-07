@@ -20,7 +20,7 @@ transport, and the terminal now carries its full visual identity.**
 
 ### 1. The gate is algorithmic, not probabilistic
 
-When `check_safety` drops or latency crosses 1,200 ms, KURA does not ask a language
+When the upstream call drops or latency crosses 1,200 ms, KURA does not ask a language
 model what to do. It does not retry with a softer prompt, fall back to a cached answer,
 or substitute a default. A synchronous TypeScript function reads the empirical values,
 fails the first invariant that breaks, and returns.
@@ -45,12 +45,18 @@ must average under 1 ms, and the returned value must not be a promise.
 
 The four gates, evaluated in order and short-circuiting on the first failure:
 
-| # | Invariant | Predicate |
-|---|-----------|-----------|
-| 1 | `LATENCY`   | `latencyMs <= 1200` |
-| 2 | `ORACLE`    | `safety !== null && !safety.error` |
-| 3 | `HONEYPOT`  | `safety.is_honeypot === false` |
-| 4 | `LIQUIDITY` | `market.liquidity_usd >= 1_000_000` |
+| # | Invariant | Predicate | Refuses |
+|---|-----------|-----------|---------|
+| 1 | `FRESHNESS`  | `latencyMs <= 1200 && asOfAgeMs <= 300_000` | slow round-trips and stale observations |
+| 2 | `ORACLE`     | `status === 'ok'` | `partial` and `unavailable` results |
+| 3 | `PROVENANCE` | `data_mode === 'live'` | `simulated`, `mixed`, `unknown` measurement |
+| 4 | `EVIDENCE`   | price and ATR(14) both measurable | sizing on a measurement that isn't there |
+
+All four read the **public builder envelope** RYO publishes and guarantees, rather than
+inferred internals a catalog change could silently invalidate. `PROVENANCE` is the one
+worth pausing on: KURA will not size capital against anything that is not a live read,
+which is exactly the failure the guide warns about and one no amount of model reasoning
+would catch.
 
 Every gate reports the value it actually saw, so a veto is fully reconstructable from
 the ledger alone months later.
@@ -143,9 +149,15 @@ Comment out the three `stdio` lines in `.env` and set:
 
 ```
 RYO_MCP_TRANSPORT=http
-RYO_MCP_URL=https://api.ryobuild.com/mcp
-RYO_MCP_TOKEN=your-token
+RYO_MCP_URL=https://app-ryochan.com/api/mcp
+RYO_MCP_KEY=your-builder-key
 ```
+
+`.env` is gitignored; `.env.example` ships with an empty key. Never commit a populated
+credential. The heartbeat polls the unauthenticated `/health` endpoint, which spends no
+tool-call quota — the guide warns against tight polling loops over the metered tools, so
+per-tool latency is sampled from real evaluations instead. `PULSE_SWEEP_TOOLS=1` opts
+into a full six-tool sweep for local work.
 
 The HTTP transport tries Streamable HTTP first and falls back to SSE. `RYO_MCP_TOKEN`
 is sent as `Authorization: Bearer …`. There is **no offline mode**: if the peer is
@@ -165,9 +177,10 @@ RYO_MCP_ARGS=tsx apps/engine/src/conformance/server.ts
 npm run demo
 ```
 
-Approves a clean token with a sized position, vetoes a thin pool, drops `check_safety`
-and watches the breaker trip in microseconds, trips the latency ceiling, recovers,
-verifies the chain, then forges a row on disk and detects it. Every line is executed.
+Approves a clean token with a sized position, refuses simulated data, drops
+`analyze_token` and watches the breaker trip in microseconds, trips the latency ceiling,
+recovers, verifies the chain, then forges a row on disk and detects it. Every line is
+executed.
 
 ### The dashboard
 
@@ -253,20 +266,38 @@ timeout once the ceiling is crossed.
 
 ## Data contract
 
-The 7 tools are described by zod schemas in
-[`apps/engine/src/schema/tools.ts`](apps/engine/src/schema/tools.ts) with three rules:
+RYO publishes **six** tools — `market_overview`, `scan_market`, `analyze_token`,
+`deep_analysis`, `compare_tokens`, `monitor_market_sentiment_shift` — and the
+unauthenticated `GET /api/mcp/health` confirms `"tools": 6`. There is no `check_safety`
+and no `supported_tokens`; the guide states the surface publishes no symbol-only safety
+tool, and `analyze_token` explicitly makes no safety claim. Token analysis takes
+**symbols, not wallet addresses**, and `compare_tokens` takes one comma-separated
+string rather than an array.
 
-- **No `.default()`, no `.catch()`, no coercion.** A missing `liquidity_usd` is a hard
-  failure, never a silently substituted zero.
-- **`error` must be present** as a string or an explicit `null`. An absent key is a
-  violation, because "absent" and "no error" are not the same claim.
+Every successful call returns the same envelope, validated in
+[`apps/engine/src/schema/tools.ts`](apps/engine/src/schema/tools.ts):
+
+```
+schema_version · tool · status · data_mode · as_of · request · data · summary · availability · warnings
+```
+
+Three rules:
+
+- **No `.default()`, no `.catch()`, no coercion.** The guide is explicit — *"Never
+  convert an unavailable or null measurement to zero."* A null ATR is a veto, not a 0.
+- **The envelope is validated strictly; `data` passes through.** The envelope is the
+  guaranteed public contract; each tool's inner `data` shape belongs to the live catalog.
 - **Unknown extra keys pass through**, so an additive upstream change does not take the
   engine down.
 
 A violation raises `SCHEMA_MISMATCH_OR_MISSING_FIELD` carrying the field path, the
-expected type and the received type. The arbiter then sees `safety: null` plus the
-structured fault and vetoes on `ORACLE` — it is *told* the oracle is unavailable rather
-than left to infer it from a zero.
+expected type and the received type. The arbiter is then handed `envelope: null` plus
+the structured fault and vetoes — it is *told* the evidence is unavailable rather than
+left to infer it from a zero.
+
+`GET /api/mcp/tools` is the authoritative catalog; the guide names it the final source
+of truth if the written contract and the deployed server ever differ. `GET /api/catalog`
+on the engine surfaces it next to the tool list KURA expects.
 
 ---
 
@@ -276,12 +307,19 @@ Approved trades are sized by fractional Kelly, deterministically — no model ca
 randomness. Confidence is a fixed weighting of three observable quantities:
 
 ```
-confidence = 0.40·safetyScore + 0.35·liquidityScore + 0.25·volumeScore
+volatilityScore   = 1 − atrPct / KELLY_MAX_ATR_PCT     (ATR(14) / price)
+completenessScore = healthy availability sections / declared sections
+confidence = 0.60·volatilityScore + 0.40·completenessScore
 pBreakEven = 1 / (1 + b)
 p          = pBreakEven + (P_MAX − pBreakEven) · confidence
 fullKelly  = (p·b − (1−p)) / b
 fraction   = min(KELLY_FRACTION · fullKelly, KELLY_MAX_POSITION_PCT), floored at 0
 ```
+
+Both inputs are measurements RYO actually returns. A more volatile asset earns a smaller
+position; thinner evidence earns a smaller position. An undeclarable availability map
+contributes **zero** confidence rather than full confidence — an unmeasured section
+never argues for a bigger bet.
 
 `p` is anchored at the break-even probability, so zero confidence yields exactly zero
 size rather than some residual floor. The `MAX_POSITION_PCT` clamp is a hard risk limit
@@ -300,7 +338,7 @@ npm run typecheck
 | File | Covers |
 |------|--------|
 | `test/hash.test.ts` | Canonical JSON ordering, stability, refusal to hash non-finite numbers. |
-| `test/schema.test.ts` | Missing/mistyped invariant fields, envelope unwrapping, no-defaults guarantee. |
+| `test/schema.test.ts` | The six-tool surface, envelope validation, `as_of` age, availability scoring, signal extraction, no-defaults guarantee. |
 | `test/arbiter.test.ts` | Every gate at its exact boundary, short-circuiting, the sub-millisecond budget, Kelly behaviour. |
 | `test/ledger.test.ts` | WAL mode, genesis linkage, chaining, tamper localisation, verify latency. |
 | `test/provenance.test.ts` | The Python verifier reproducing TypeScript hashes across every number-formatting branch. |
@@ -312,9 +350,10 @@ npm run typecheck
 
 [`apps/engine/src/conformance/server.ts`](apps/engine/src/conformance/server.ts) is a
 real MCP server — real SDK, real JSON-RPC, real stdio, real child process — exposing
-the 7 tools with profiles chosen to drive every distinct outcome: `SOL` and `JUP`
-approve at different sizes, `BONK` fails liquidity, `HNYP` is a honeypot, `ORCL`
-returns an oracle error, and `BADS` deliberately violates the contract.
+the same six tools and the same public envelope as production, with profiles chosen to
+drive every distinct outcome: `SOL` and `AVAX` approve at different sizes, `STALE` fails
+freshness, `PARTL` returns `status: "partial"`, `SIMUL` returns `data_mode: "simulated"`,
+`NOEVD` has a null ATR(14), and `BADEV` deliberately omits `data_mode`.
 
 It exists so the engine can be exercised reproducibly before a live endpoint is wired
 in, and so the resilience benchmark has a stable baseline. **The engine never reads it

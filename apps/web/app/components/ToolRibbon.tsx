@@ -17,9 +17,8 @@ export function ToolRibbon({
   chaos: ChaosState[];
 }) {
   return (
-    // 7 tools tile evenly into neither 2 nor 4 columns, so the last chip absorbs the
-    // remainder at both breakpoints until the full 7-across ribbon fits at xl.
-    <div className="grid grid-cols-2 gap-px overflow-hidden rounded-md border border-border bg-border [&>*:last-child]:col-span-2 sm:grid-cols-4 xl:grid-cols-7 xl:[&>*:last-child]:col-span-1">
+    // Six tools tile evenly at every breakpoint: 2 / 3 / 6 across.
+    <div className="grid grid-cols-2 gap-px overflow-hidden rounded-md border border-border bg-border sm:grid-cols-3 lg:grid-cols-6">
       {TOOL_NAMES.map((tool) => {
         const pulse = pulses[tool];
         const injected = chaos.find((c) => c.tool === tool || c.tool === '*');

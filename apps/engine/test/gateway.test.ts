@@ -89,10 +89,10 @@ describe('KURA as an MCP gateway', () => {
   it('publishes the policy the agent is held to', async () => {
     const { parsed } = await callJson('gate_policy');
     expect(parsed.invariants.map((i: any) => i.id)).toEqual([
-      'LATENCY',
+      'FRESHNESS',
       'ORACLE',
-      'HONEYPOT',
-      'LIQUIDITY',
+      'PROVENANCE',
+      'EVIDENCE',
     ]);
     expect(parsed.sizing.model).toContain('break-even');
     expect(parsed.upstream_connected).toBe(true);
@@ -104,36 +104,39 @@ describe('KURA as an MCP gateway', () => {
     expect(parsed.gates.every((g: any) => g.state === 'PASS')).toBe(true);
     expect(parsed.sizing.position_usd).toBeGreaterThan(0);
     expect(parsed.sizing.break_even_probability).toBe(0.4);
+    expect(parsed.upstream_status).toBe('ok');
+    expect(parsed.upstream_data_mode).toBe('live');
     expect(parsed.receipt.receipt_id).toMatch(/^[0-9a-f-]{36}$/);
     expect(parsed.receipt.block_hash).toHaveLength(64);
     expect(parsed.gate_evaluation_micros).toBeLessThan(1000);
   });
 
-  it('VETOES a thin pool through the gateway, with no size and a named gate', async () => {
-    const { parsed } = await callJson('evaluate_candidate', { symbol: 'BONK' });
+  it('VETOES simulated data through the gateway, with no size and a named gate', async () => {
+    const { parsed } = await callJson('evaluate_candidate', { symbol: 'SIMUL' });
     expect(parsed.decision).toBe('VETOED');
-    expect(parsed.failed_invariant).toBe('LIQUIDITY');
+    expect(parsed.failed_invariant).toBe('PROVENANCE');
     expect(parsed.sizing).toBeNull();
-    expect(parsed.gates.filter((g: any) => g.state === 'NOT_EVALUATED')).toHaveLength(0);
+    // Refusing to size on non-live measurement is the point of this gate.
+    expect(parsed.upstream_data_mode).toBe('simulated');
   });
 
   it('cannot be routed around: a dropped oracle vetoes rather than degrading', async () => {
-    sup.chaos.set('check_safety', 'DROP');
+    sup.chaos.set('analyze_token', 'DROP');
     const { parsed } = await callJson('evaluate_candidate', { symbol: 'SOL' });
     expect(parsed.decision).toBe('VETOED');
-    expect(parsed.failed_invariant).toBe('ORACLE');
+    expect(parsed.failed_invariant).toBe('FRESHNESS');
     expect(parsed.reason).toContain('TRANSPORT_DROPPED');
     expect(parsed.sizing).toBeNull();
     // Downstream gates were never evaluated — the agent can see the short circuit.
     const skipped = parsed.gates.filter((g: any) => g.state === 'NOT_EVALUATED').map((g: any) => g.id);
-    expect(skipped).toEqual(['HONEYPOT', 'LIQUIDITY']);
+    expect(skipped).toEqual(['ORACLE', 'PROVENANCE', 'EVIDENCE']);
 
     sup.chaos.set('*', 'RESET');
     expect(await sup.reconnectNow()).toBe(true);
   });
 
   it('lets the agent verify any receipt it was handed', async () => {
-    const { parsed: verdict } = await callJson('evaluate_candidate', { symbol: 'JUP' });
+    const { parsed: verdict } = await callJson('evaluate_candidate', { symbol: 'AVAX' });
     const { parsed: verified } = await callJson('verify_receipt', {
       receipt_id: verdict.receipt.receipt_id,
     });
@@ -147,8 +150,9 @@ describe('KURA as an MCP gateway', () => {
     const { parsed: receipt } = await callJson('get_receipt', {
       receipt_id: verdict.receipt.receipt_id,
     });
-    expect(receipt.raw_payload.check_safety.is_honeypot).toBe(false);
-    expect(receipt.raw_payload.analyze_token.liquidity_usd).toBeGreaterThan(0);
+    expect(receipt.raw_payload.analyze_token.data_mode).toBe('live');
+    expect(receipt.raw_payload.analyze_token.status).toBe('ok');
+    expect(receipt.raw_payload.signals.atr_14).toBeGreaterThan(0);
     expect(receipt.invariants).toHaveLength(4);
   });
 

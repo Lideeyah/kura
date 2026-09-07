@@ -98,7 +98,8 @@ export function QuickStart({ mcpEndpoint }: { mcpEndpoint: string }) {
             routed around. Upstream credentials go in{' '}
             <code className="text-text-muted">.env</code> as{' '}
             <code className="text-text-muted">RYO_MCP_URL</code> and{' '}
-            <code className="text-text-muted">RYO_MCP_TOKEN</code>.
+            <code className="text-text-muted">RYO_MCP_KEY</code>. Never commit a populated
+            credential.
           </p>
         </div>
       )}

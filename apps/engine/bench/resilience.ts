@@ -11,7 +11,7 @@
  *
  * Fault classes:
  *   latency_spike     injected delay pushes the upstream past the 1200 ms ceiling
- *   malformed_payload the peer returns a contract-breaking check_safety body
+ *   malformed_payload the peer returns an envelope missing data_mode
  *   peer_crash        the MCP child process is killed and must be respawned
  */
 import { mkdtempSync, rmSync, writeFileSync } from 'node:fs';
@@ -100,12 +100,12 @@ async function main() {
   // ── latency_spike ───────────────────────────────────────────────────────────
   const latency: Trial[] = [];
   for (let i = 0; i < TRIALS; i += 1) {
-    sup.chaos.set('check_safety', 'DELAY', 1400);
+    sup.chaos.set('analyze_token', 'DELAY', 1400);
     const { verdict } = await sup.evaluate({ symbol: HEALTHY });
     sup.chaos.set('*', 'RESET');
     latency.push({
       recoveryMs: await recoverToApproved(sup),
-      detectedVeto: verdict.decision === 'VETOED' && verdict.failedInvariant === 'LATENCY',
+      detectedVeto: verdict.decision === 'VETOED' && verdict.failedInvariant === 'FRESHNESS',
       detectedReason: verdict.reason,
     });
     progress('latency_spike', i + 1);
@@ -115,7 +115,7 @@ async function main() {
   // ── malformed_payload ───────────────────────────────────────────────────────
   const malformed: Trial[] = [];
   for (let i = 0; i < TRIALS; i += 1) {
-    const { verdict } = await sup.evaluate({ symbol: 'BADS' });
+    const { verdict } = await sup.evaluate({ symbol: 'BADEV' });
     malformed.push({
       recoveryMs: await recoverToApproved(sup),
       detectedVeto:
@@ -129,12 +129,12 @@ async function main() {
   // ── peer_crash ──────────────────────────────────────────────────────────────
   const crash: Trial[] = [];
   for (let i = 0; i < TRIALS; i += 1) {
-    sup.chaos.set('check_safety', 'DROP');
+    sup.chaos.set('analyze_token', 'DROP');
     const { verdict } = await sup.evaluate({ symbol: HEALTHY });
     sup.chaos.set('*', 'RESET');
     crash.push({
       recoveryMs: await recoverToApproved(sup),
-      detectedVeto: verdict.decision === 'VETOED' && verdict.failedInvariant === 'ORACLE',
+      detectedVeto: verdict.decision === 'VETOED' && verdict.failedInvariant === 'FRESHNESS',
       detectedReason: verdict.reason,
     });
     progress('peer_crash', i + 1);

@@ -2,15 +2,16 @@ import { config } from '../config.js';
 import { bus, type CallStatus, type ChaosState } from '../bus/telemetry.js';
 import {
   SchemaMismatchError,
-  validateToolPayload,
+  validateEnvelope,
+  type RyoEnvelope,
   type ToolName,
-  type ToolPayload,
 } from '../schema/tools.js';
 import { EngineError } from './errors.js';
 import type { RyoClient } from './client.js';
 
-export interface CallResult<T extends ToolName> {
-  payload: ToolPayload[T];
+export interface CallResult {
+  /** The validated public builder envelope. */
+  payload: RyoEnvelope;
   /** Exactly what came off the wire, before validation. This is what gets hashed. */
   raw: unknown;
   latencyMs: number;
@@ -110,10 +111,7 @@ export class InterceptedRyo {
     readonly chaos: ChaosController,
   ) {}
 
-  async call<T extends ToolName>(
-    tool: T,
-    args: Record<string, unknown> = {},
-  ): Promise<CallResult<T>> {
+  async call(tool: ToolName, args: Record<string, unknown> = {}): Promise<CallResult> {
     const started = performance.now();
     const entry = this.chaos.resolve(tool);
     const controller = new AbortController();
@@ -147,7 +145,7 @@ export class InterceptedRyo {
         timeoutMs: config.mcp.requestTimeoutMs,
       });
       const raw = unwrapEnvelope(tool, envelope);
-      const payload = validateToolPayload(tool, raw);
+      const payload = validateEnvelope(tool, raw);
       const latencyMs = performance.now() - started;
 
       this.pulse(tool, latencyMs, 'OK');

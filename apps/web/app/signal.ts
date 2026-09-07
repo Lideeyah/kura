@@ -108,6 +108,8 @@ export function triggeredGate(reason: string, failedInvariant: string | null): s
   if (reason.includes('TRANSPORT_DROPPED')) return 'ORACLE_DROP';
   if (reason.includes('SCHEMA_MISMATCH')) return 'SCHEMA_BREAK';
   if (reason.includes('UPSTREAM_TIMEOUT')) return 'UPSTREAM_TIMEOUT';
+  if (reason.includes('data_mode')) return 'NOT_LIVE';
+  if (reason.includes('observation')) return 'STALE_AS_OF';
   return failedInvariant;
 }
 
@@ -126,8 +128,23 @@ export function failedGateOf(invariantsJson: string): string | null {
 }
 
 export const GATE_LABEL: Record<string, string> = {
-  LATENCY: 'FRESHNESS',
+  FRESHNESS: 'FRESHNESS',
   ORACLE: 'ORACLE INTEGRITY',
-  HONEYPOT: 'CONTRACT SECURITY',
-  LIQUIDITY: 'LIQUIDITY FLOOR',
+  PROVENANCE: 'DATA PROVENANCE',
+  EVIDENCE: 'EVIDENCE FLOOR',
 };
+
+/** data_mode is the provenance signal: only a live read may size capital. */
+export function dataModeSignal(mode: string | null): Signal {
+  if (mode === 'live') return 'ok';
+  if (mode === null) return 'idle';
+  return 'halt';
+}
+
+/** status is the completeness signal: partial and unavailable are refusals. */
+export function statusOfResult(status: string | null): Signal {
+  if (status === 'ok') return 'ok';
+  if (status === 'partial') return 'warn';
+  if (status === null) return 'idle';
+  return 'halt';
+}

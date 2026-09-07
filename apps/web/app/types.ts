@@ -1,11 +1,11 @@
+/** The six tools RYO publishes. GET /api/mcp/health reports "tools": 6. */
 export const TOOL_NAMES = [
   'market_overview',
   'scan_market',
   'analyze_token',
   'deep_analysis',
   'compare_tokens',
-  'check_safety',
-  'supported_tokens',
+  'monitor_market_sentiment_shift',
 ] as const;
 
 export type ToolName = (typeof TOOL_NAMES)[number];
@@ -25,7 +25,7 @@ export interface ToolPulse {
   detail?: string;
 }
 
-export type InvariantId = 'LATENCY' | 'ORACLE' | 'HONEYPOT' | 'LIQUIDITY';
+export type InvariantId = 'FRESHNESS' | 'ORACLE' | 'PROVENANCE' | 'EVIDENCE';
 export type InvariantState = 'PASS' | 'FAIL' | 'NOT_EVALUATED';
 
 export interface InvariantResult {
@@ -39,12 +39,13 @@ export interface InvariantResult {
 
 export interface KellySizing {
   p: number;
+  pBreakEven: number;
   b: number;
   fullKelly: number;
   fraction: number;
   positionUsd: number;
   bankrollUsd: number;
-  inputs: { liquidityScore: number; volumeScore: number; safetyScore: number; confidence: number };
+  inputs: { volatilityScore: number; completenessScore: number; confidence: number; atrPct: number };
   clampedBy: string;
 }
 
@@ -56,6 +57,9 @@ export interface ArbiterVerdict {
   invariants: InvariantResult[];
   sizing: KellySizing | null;
   latencyMs: number;
+  status: 'ok' | 'partial' | 'unavailable' | null;
+  dataMode: 'live' | 'mixed' | 'simulated' | 'unknown' | null;
+  asOfAgeMs: number | null;
   evaluationMicros: number;
   at: string;
 }

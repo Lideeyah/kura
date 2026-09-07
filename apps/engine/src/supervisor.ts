@@ -8,7 +8,6 @@ import { TOOL_NAMES, type ToolName } from './schema/tools.js';
 
 export interface WatchToken {
   symbol: string;
-  address?: string;
 }
 
 /**
@@ -72,7 +71,7 @@ export class Supervisor {
       await this.client.connect();
       this.lastConnectError = null;
       this.backoffMs = config.mcp.reconnectBackoffMs;
-      await this.refreshWatchlist();
+      this.refreshWatchlist();
       return true;
     } catch (err) {
       this.lastConnectError = err instanceof Error ? err.message : String(err);
@@ -107,34 +106,56 @@ export class Supervisor {
     this.reconnectTimer.unref?.();
   }
 
-  private async refreshWatchlist(): Promise<void> {
-    try {
-      const res = await this.ryo.call('supported_tokens', {});
-      this.watchlist = res.payload.tokens.map((t) => ({ symbol: t.symbol, address: t.address }));
-    } catch {
-      // Leave the previous watchlist in place; the pulse loop will surface the fault.
-    }
+  /**
+   * RYO publishes no `supported_tokens` tool, so the candidate list is the operator's
+   * own watchlist from config rather than something discovered upstream. This also
+   * keeps startup free of tool-call quota spend.
+   */
+  private refreshWatchlist(): void {
+    this.watchlist = config.watchlist.map((symbol) => ({ symbol }));
   }
 
   private pingArgs(tool: ToolName): Record<string, unknown> {
-    const a = this.watchlist[0];
-    const b = this.watchlist[1] ?? a;
+    const a = this.watchlist[0]?.symbol ?? 'SOL';
+    const b = this.watchlist[1]?.symbol ?? a;
     switch (tool) {
       case 'market_overview':
-      case 'supported_tokens':
+      case 'monitor_market_sentiment_shift':
         return {};
       case 'scan_market':
-        return { limit: 5 };
+        return { top_n: 5 };
+      // Two to four distinct symbols as ONE comma-separated string, per the guide.
       case 'compare_tokens':
-        return { symbols: [a?.symbol ?? 'SOL', b?.symbol ?? 'SOL'] };
+        return { symbols: a === b ? a : `${a}, ${b}` };
       default:
-        return a ? { symbol: a.symbol, address: a.address } : { symbol: 'SOL' };
+        return { symbol: a };
     }
   }
 
-  /** Heartbeat across all 7 tools. Failures publish pulses too — that is the point. */
+  /**
+   * Liveness heartbeat.
+   *
+   * The guide warns against tight polling loops over the metered tools and states that
+   * /health needs no auth and spends no quota, so the heartbeat asks /health and the
+   * per-tool latency figures come from real evaluations instead. Set
+   * PULSE_SWEEP_TOOLS=1 to fan out across all six tools — useful against the local
+   * conformance peer, expensive against production.
+   */
   async pulseAll(): Promise<void> {
     if (!this.client.connected) return;
+
+    if (!config.telemetry.pulseSweepTools) {
+      const health = await this.client.fetchHealth();
+      bus.publish({
+        type: 'connection',
+        connected: health.ok && this.client.connected,
+        transport: this.client.description,
+        detail: health.detail,
+        at: new Date().toISOString(),
+      });
+      return;
+    }
+
     for (const tool of TOOL_NAMES) {
       if (!this.client.connected) break;
       try {
@@ -156,6 +177,11 @@ export class Supervisor {
 
   async evaluate(token: WatchToken): Promise<EvaluationOutcome> {
     return evaluateToken(this.ryo, this.ledger, token);
+  }
+
+  /** The authenticated catalog, which the guide names the final source of truth. */
+  async catalog(): Promise<{ names: string[]; error: string | null }> {
+    return this.client.fetchCatalog();
   }
 
   async stop(): Promise<void> {

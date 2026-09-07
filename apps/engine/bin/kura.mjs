@@ -20,6 +20,8 @@ const [command = 'start', ...rest] = process.argv.slice(2);
 const USAGE = `kura — deterministic pre-trade gate for RYO-CHAN
 
   kura start        start the engine (HTTP API + SSE + MCP gateway on ENGINE_PORT)
+  kura gateway      serve ONLY the MCP gateway over stdio, for command-based MCP
+                    clients. stdout is JSON-RPC; diagnostics go to stderr.
   kura verify       verify the whole ledger hash chain
   kura --help
 
@@ -40,7 +42,14 @@ function run(cmd, args) {
   });
 }
 
-if (command === 'start') {
+if (command === 'gateway') {
+  const stdioEntry = resolve(engineRoot, 'src/gateway/stdio.ts');
+  if (!existsSync(stdioEntry)) {
+    process.stderr.write(`kura: gateway entrypoint not found at ${stdioEntry}\n`);
+    process.exit(1);
+  }
+  run('npx', ['tsx', stdioEntry, ...rest]);
+} else if (command === 'start') {
   if (!existsSync(entry)) {
     process.stderr.write(`kura: entrypoint not found at ${entry}\n`);
     process.exit(1);

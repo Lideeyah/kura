@@ -10,7 +10,8 @@
     "test": "vitest run",
     "typecheck": "tsc --noEmit",
     "test:resilience": "tsx bench/resilience.ts",
-    "demo": "tsx bench/demo.ts"
+    "demo": "tsx bench/demo.ts",
+    "gateway": "tsx src/gateway/stdio.ts"
   },
   "dependencies": {
     "@fastify/cors": "^10.0.1",

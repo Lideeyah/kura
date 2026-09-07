@@ -1,89 +1,85 @@
 /**
- * Deterministic token profiles used by the conformance MCP peer.
+ * Deterministic profiles for the conformance MCP peer, shaped to the real RYO public
+ * builder envelope (schema_version / tool / status / data_mode / as_of / request /
+ * data / summary / availability / warnings).
  *
- * These exist so the engine can be exercised end-to-end over real transport before a
- * live RYO-CHAN endpoint is wired in, and so the resilience benchmark has a stable
- * baseline. They are NOT a fallback: the engine never reads this file, and if the
- * configured MCP peer is unreachable the engine fails loudly instead of using these.
+ * These exist so the engine can be exercised end to end over real transport without
+ * spending metered quota, and so the resilience benchmark has a stable baseline. They
+ * are NOT a fallback: the engine never reads this file, and if the configured MCP peer
+ * is unreachable the engine fails loudly instead of using these.
  *
- * Each profile is chosen to drive a different arbiter outcome:
- *   SOL   clean, deep    -> APPROVED with a sized position
- *   JUP   clean, mid     -> APPROVED with a smaller position
- *   BONK  thin liquidity -> VETOED on LIQUIDITY
- *   HNYP  honeypot       -> VETOED on HONEYPOT
- *   ORCL  oracle error   -> VETOED on ORACLE
- *   BADS  broken schema  -> SCHEMA_MISMATCH_OR_MISSING_FIELD, then VETOED on ORACLE
+ * Each profile drives a different arbiter outcome:
+ *   SOL     ok / live / fresh / low ATR   -> APPROVED, larger size
+ *   AVAX    ok / live / fresh / high ATR  -> APPROVED, smaller size
+ *   STALE   as_of far in the past         -> VETOED on FRESHNESS
+ *   PARTL   status "partial"              -> VETOED on ORACLE
+ *   SIMUL   data_mode "simulated"         -> VETOED on PROVENANCE
+ *   NOEVD   ok / live but no ATR(14)      -> VETOED on EVIDENCE
+ *   BADEV   envelope missing data_mode    -> SCHEMA_MISMATCH_OR_MISSING_FIELD
  */
 
 export interface Profile {
   symbol: string;
-  address: string;
-  chain: string;
-  price_usd: number;
-  liquidity_usd: number;
-  volume_24h_usd: number;
-  market_cap_usd: number;
-  price_change_24h: number;
-  holders: number;
-  safety: {
-    is_honeypot: boolean;
-    can_sell: boolean;
-    score: number;
-    buy_tax_bps: number;
-    sell_tax_bps: number;
-    error: string | null;
-  };
-  /** When true, check_safety deliberately emits a contract-violating payload. */
-  breakSchema?: boolean;
+  status: 'ok' | 'partial' | 'unavailable';
+  dataMode: 'live' | 'mixed' | 'simulated' | 'unknown';
+  priceUsd: number;
+  atr14: number | null;
+  rsi14: number;
+  changePct: number;
+  /** Seconds subtracted from now when stamping `as_of`. */
+  asOfAgeSec: number;
+  availability: Record<string, string>;
+  warnings: string[];
+  /** When true, the peer emits a contract-violating envelope on purpose. */
+  breakEnvelope?: boolean;
 }
+
+const FULL = { market: 'ok', technicals: 'ok', intelligence: 'ok' };
 
 export const PROFILES: Profile[] = [
   {
-    symbol: 'SOL', address: 'So11111111111111111111111111111111111111112', chain: 'solana',
-    price_usd: 172.44, liquidity_usd: 48_200_000, volume_24h_usd: 91_500_000,
-    market_cap_usd: 82_400_000_000, price_change_24h: 2.13, holders: 1_842_003,
-    safety: { is_honeypot: false, can_sell: true, score: 96, buy_tax_bps: 0, sell_tax_bps: 0, error: null },
+    symbol: 'SOL', status: 'ok', dataMode: 'live',
+    priceUsd: 172.44, atr14: 4.31, rsi14: 56.2, changePct: 2.13,
+    asOfAgeSec: 12, availability: FULL, warnings: [],
   },
   {
-    symbol: 'JUP', address: 'JUPyiwrYJFskUPiHa7hkeR8VUtAeFoSYbKedZNsDvCN', chain: 'solana',
-    price_usd: 0.8412, liquidity_usd: 6_150_000, volume_24h_usd: 12_300_000,
-    market_cap_usd: 1_140_000_000, price_change_24h: -1.07, holders: 612_450,
-    safety: { is_honeypot: false, can_sell: true, score: 88, buy_tax_bps: 0, sell_tax_bps: 0, error: null },
+    symbol: 'AVAX', status: 'ok', dataMode: 'live',
+    priceUsd: 27.9, atr14: 3.15, rsi14: 61.4, changePct: 5.02,
+    asOfAgeSec: 20, availability: { ...FULL, intelligence: 'partial' },
+    warnings: ['intelligence coverage is partial for this asset'],
   },
   {
-    symbol: 'BONK', address: 'DezXAZ8z7PnrnRJjz3wXBoRgixCa6xjnB7YaB1pPB263', chain: 'solana',
-    price_usd: 0.0000221, liquidity_usd: 240_000, volume_24h_usd: 3_100_000,
-    market_cap_usd: 1_620_000_000, price_change_24h: 5.88, holders: 921_004,
-    safety: { is_honeypot: false, can_sell: true, score: 71, buy_tax_bps: 0, sell_tax_bps: 0, error: null },
+    symbol: 'STALE', status: 'ok', dataMode: 'live',
+    priceUsd: 1.02, atr14: 0.04, rsi14: 49.0, changePct: 0.1,
+    asOfAgeSec: 3_600, availability: FULL,
+    warnings: ['observation is older than the freshness budget'],
   },
   {
-    symbol: 'HNYP', address: 'HnYp1111111111111111111111111111111111111111', chain: 'solana',
-    price_usd: 0.0134, liquidity_usd: 9_400_000, volume_24h_usd: 2_050_000,
-    market_cap_usd: 13_400_000, price_change_24h: 41.2, holders: 1_204,
-    safety: { is_honeypot: true, can_sell: false, score: 4, buy_tax_bps: 300, sell_tax_bps: 9_900, error: null },
+    symbol: 'PARTL', status: 'partial', dataMode: 'live',
+    priceUsd: 8.4, atr14: 0.32, rsi14: 44.1, changePct: -1.2,
+    asOfAgeSec: 15, availability: { ...FULL, technicals: 'partial' },
+    warnings: ['technical section incomplete: insufficient price history'],
   },
   {
-    symbol: 'ORCL', address: 'OrCL1111111111111111111111111111111111111111', chain: 'solana',
-    price_usd: 1.02, liquidity_usd: 4_800_000, volume_24h_usd: 700_000,
-    market_cap_usd: 22_000_000, price_change_24h: 0.4, holders: 8_402,
-    safety: {
-      is_honeypot: false, can_sell: true, score: 0, buy_tax_bps: 0, sell_tax_bps: 0,
-      error: 'simulation_unavailable: rpc node returned no trace',
-    },
+    symbol: 'SIMUL', status: 'ok', dataMode: 'simulated',
+    priceUsd: 3.2, atr14: 0.09, rsi14: 52.0, changePct: 0.8,
+    asOfAgeSec: 10, availability: FULL,
+    warnings: ['values are simulated and must not be used for execution'],
   },
   {
-    symbol: 'BADS', address: 'BaDs1111111111111111111111111111111111111111', chain: 'solana',
-    price_usd: 0.51, liquidity_usd: 3_300_000, volume_24h_usd: 480_000,
-    market_cap_usd: 9_100_000, price_change_24h: -3.2, holders: 3_112,
-    safety: { is_honeypot: false, can_sell: true, score: 60, buy_tax_bps: 0, sell_tax_bps: 0, error: null },
-    breakSchema: true,
+    symbol: 'NOEVD', status: 'ok', dataMode: 'live',
+    priceUsd: 0.51, atr14: null, rsi14: 50.0, changePct: -0.4,
+    asOfAgeSec: 18, availability: { ...FULL, technicals: 'unavailable' },
+    warnings: ['ATR(14) unavailable: not enough price history'],
+  },
+  {
+    symbol: 'BADEV', status: 'ok', dataMode: 'live',
+    priceUsd: 12.0, atr14: 0.5, rsi14: 55.0, changePct: 1.0,
+    asOfAgeSec: 10, availability: FULL, warnings: [], breakEnvelope: true,
   },
 ];
 
-export function findProfile(symbolOrAddress: string | undefined): Profile {
-  const needle = (symbolOrAddress ?? 'SOL').toLowerCase();
-  return (
-    PROFILES.find((p) => p.symbol.toLowerCase() === needle || p.address.toLowerCase() === needle) ??
-    PROFILES[0]!
-  );
+export function findProfile(symbol: string | undefined): Profile {
+  const needle = (symbol ?? 'SOL').trim().toUpperCase();
+  return PROFILES.find((p) => p.symbol === needle) ?? PROFILES[0]!;
 }

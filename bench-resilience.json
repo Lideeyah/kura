@@ -1,41 +1,41 @@
 {
-  "generatedAt": "2026-09-07T08:22:15.681Z",
-  "trialsPerClass": 50,
+  "generatedAt": "2026-09-07T17:06:09.593Z",
+  "trialsPerClass": 10,
   "reports": [
     {
       "fault": "latency_spike",
-      "trials": 50,
+      "trials": 10,
       "detectionRate": 1,
       "recoveryRate": 1,
-      "medianMs": 1.61,
-      "p95Ms": 2.4,
-      "minMs": 0.68,
-      "maxMs": 3.13
+      "medianMs": 1.87,
+      "p95Ms": 3.28,
+      "minMs": 1.52,
+      "maxMs": 3.28
     },
     {
       "fault": "malformed_payload",
-      "trials": 50,
+      "trials": 10,
       "detectionRate": 1,
       "recoveryRate": 1,
       "medianMs": 0.65,
-      "p95Ms": 1.68,
-      "minMs": 0.38,
-      "maxMs": 5.62
+      "p95Ms": 2.76,
+      "minMs": 0.45,
+      "maxMs": 2.76
     },
     {
       "fault": "peer_crash",
-      "trials": 50,
+      "trials": 10,
       "detectionRate": 1,
       "recoveryRate": 1,
-      "medianMs": 519.76,
-      "p95Ms": 543.03,
-      "minMs": 503.07,
-      "maxMs": 702.19
+      "medianMs": 521.03,
+      "p95Ms": 762.18,
+      "minMs": 515.77,
+      "maxMs": 762.18
     }
   ],
   "chain": {
     "valid": true,
-    "length": 300,
+    "length": 60,
     "brokenAtSeq": null,
     "failures": []
   }

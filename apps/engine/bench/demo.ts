@@ -3,8 +3,8 @@
  * prints what happened, in order:
  *
  *   1. a clean token is APPROVED and sized
- *   2. a thin pool is VETOED on LIQUIDITY — the data changed the outcome
- *   3. check_safety is dropped; the breaker vetoes in microseconds with no LLM
+ *   2. simulated data is VETOED on PROVENANCE — the data changed the outcome
+ *   3. analyze_token is dropped; the breaker vetoes in microseconds with no LLM
  *   4. an injected latency spike trips the 1200 ms ceiling
  *   5. the engine recovers on its own and approves again
  *   6. every decision is committed to a SHA-256 hash chain that verifies
@@ -52,11 +52,11 @@ async function main() {
   step(1, 'a clean, deep token is approved and sized');
   show((await sup.evaluate({ symbol: 'SOL' })).verdict);
 
-  step(2, 'a thin pool is vetoed — the data changed the outcome');
-  show((await sup.evaluate({ symbol: 'BONK' })).verdict);
+  step(2, 'simulated data is refused — the data changed the outcome');
+  show((await sup.evaluate({ symbol: 'SIMUL' })).verdict);
 
-  step(3, 'check_safety is dropped: zero-fallback circuit breaker');
-  sup.chaos.set('check_safety', 'DROP');
+  step(3, 'analyze_token is dropped: zero-fallback circuit breaker');
+  sup.chaos.set('analyze_token', 'DROP');
   const dropped = await sup.evaluate({ symbol: 'SOL' });
   show(dropped.verdict);
   console.log(`     receipt     ${dropped.record.receipt_id}`);
@@ -85,7 +85,7 @@ async function main() {
   step(7, 'a forged row is detected');
   const victim = sup.ledger.list(10)[2]!;
   const forged = JSON.parse(victim.raw_payload_json);
-  if (forged.analyze_token) forged.analyze_token.liquidity_usd = 99_000_000;
+  if (forged.analyze_token) forged.analyze_token.data_mode = 'live';
   else forged.forged = true;
   const db = new Database(dbPath);
   db.prepare('UPDATE ledger SET raw_payload_json = ? WHERE receipt_id = ?')

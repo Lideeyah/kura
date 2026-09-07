@@ -28,7 +28,7 @@ export default function FlightTerminal() {
   const [health, setHealth] = useState<Health | null>(null);
   const [watchlist, setWatchlist] = useState<Array<{ symbol: string; address?: string }>>([]);
   const [symbol, setSymbol] = useState('');
-  const [target, setTarget] = useState<ToolName>('check_safety');
+  const [target, setTarget] = useState<ToolName>('analyze_token');
   const [delayMs, setDelayMs] = useState(2500);
   const [busy, setBusy] = useState(false);
 
