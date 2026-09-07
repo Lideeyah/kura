@@ -1,41 +1,41 @@
 {
-  "generatedAt": "2026-09-07T17:06:09.593Z",
-  "trialsPerClass": 10,
+  "generatedAt": "2026-09-07T17:07:58.879Z",
+  "trialsPerClass": 50,
   "reports": [
     {
       "fault": "latency_spike",
-      "trials": 10,
+      "trials": 50,
       "detectionRate": 1,
       "recoveryRate": 1,
-      "medianMs": 1.87,
-      "p95Ms": 3.28,
-      "minMs": 1.52,
-      "maxMs": 3.28
+      "medianMs": 1.69,
+      "p95Ms": 2.9,
+      "minMs": 0.84,
+      "maxMs": 3.24
     },
     {
       "fault": "malformed_payload",
-      "trials": 10,
+      "trials": 50,
       "detectionRate": 1,
       "recoveryRate": 1,
-      "medianMs": 0.65,
-      "p95Ms": 2.76,
-      "minMs": 0.45,
-      "maxMs": 2.76
+      "medianMs": 0.47,
+      "p95Ms": 0.93,
+      "minMs": 0.27,
+      "maxMs": 3.26
     },
     {
       "fault": "peer_crash",
-      "trials": 10,
+      "trials": 50,
       "detectionRate": 1,
       "recoveryRate": 1,
-      "medianMs": 521.03,
-      "p95Ms": 762.18,
-      "minMs": 515.77,
-      "maxMs": 762.18
+      "medianMs": 519.42,
+      "p95Ms": 595.21,
+      "minMs": 509.25,
+      "maxMs": 824.64
     }
   ],
   "chain": {
     "valid": true,
-    "length": 60,
+    "length": 300,
     "brokenAtSeq": null,
     "failures": []
   }
