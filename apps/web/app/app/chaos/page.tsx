@@ -8,33 +8,38 @@ import { formatClock, formatMicros } from '../../signal';
 import type { ArbiterVerdict } from '../../types';
 
 /**
- * The four production failure modes, each wired to the fault that actually causes it
- * upstream — not to a fixture that happens to look like it.
+ * Four real faults applied to the live transport.
+ *
+ * The verbs matter. Nothing here is mocked or stubbed: DELAY stalls the real call,
+ * the DEGRADE actions rewrite the validated envelope so the arbiter sees exactly what a
+ * degraded upstream would produce (which is why they work against live RYO and not only
+ * against fixtures), and RATE_LIMIT drives the production retry wrapper against a
+ * genuine 429 with a genuine Retry-After header.
  */
 const INJECTORS = [
   {
     action: 'DELAY',
     delayMs: 3000,
-    label: 'Inject High Latency',
-    detail: '3000ms upstream stall',
+    label: 'Stall the upstream call',
+    detail: 'holds the live call open for 3000ms',
     gate: 'FRESHNESS',
   },
   {
     action: 'DEGRADE_STATUS',
-    label: 'Simulate Degraded Oracle',
-    detail: 'forces status = "partial"',
+    label: 'Degrade the oracle',
+    detail: 'rewrites the envelope to status = "partial"',
     gate: 'ORACLE',
   },
   {
     action: 'DEGRADE_MODE',
-    label: 'Mock Synthetic Feed',
-    detail: 'forces data_mode = "simulated"',
+    label: 'Mark the feed non-live',
+    detail: 'rewrites the envelope to data_mode = "simulated"',
     gate: 'PROVENANCE',
   },
   {
     action: 'RATE_LIMIT',
-    label: 'Simulate Upstream Rate Limit',
-    detail: 'HTTP 429 → Retry-After, then full jitter',
+    label: 'Rate-limit the upstream',
+    detail: 'real HTTP 429 + Retry-After through the production retry path',
     gate: 'FRESHNESS',
   },
 ] as const;
@@ -63,7 +68,7 @@ export default function ChaosPage() {
     <>
       <PageTitle
         title="Chaos Lab"
-        blurb="Break the upstream on purpose and watch the breaker respond. Each injector reproduces a real production failure mode; the rate limiter drives the same retry code that wraps every live HTTP request."
+        blurb="Break the upstream on purpose and watch the breaker respond. Every injector below applies a real fault to the live transport — not a fixture, not a stub. The rate limiter drives the same retry code that wraps every production HTTP request."
       />
 
       <div className="grid gap-4 lg:grid-cols-5">
@@ -114,7 +119,7 @@ export default function ChaosPage() {
                 );
               })}
             </div>
-            <div className="border-t border-border px-4 py-3">
+            <div className="space-y-2 border-t border-border px-4 py-3">
               <Button
                 disabled={busy || telemetry.chaos.length === 0}
                 onClick={() => void setChaos('RESET', '*')}
@@ -122,6 +127,12 @@ export default function ChaosPage() {
               >
                 Clear All Injected Faults
               </Button>
+              <p className="text-2xs leading-relaxed text-text-dim">
+                <b className="text-text-muted">status</b> and{' '}
+                <b className="text-text-muted">data_mode</b> are RYO&apos;s own published
+                fields. An injector makes the upstream answer with a value it really can
+                return — KURA&apos;s job is to read it and refuse.
+              </p>
             </div>
           </Panel>
 
@@ -144,6 +155,13 @@ export default function ChaosPage() {
               <p className="border-t border-border px-4 py-3 text-xs leading-relaxed text-text-muted">
                 {verdict.reason}
               </p>
+              {verdict.dataMode && verdict.dataMode !== 'live' ? (
+                <p className="border-t border-border px-4 py-2.5 text-2xs leading-relaxed text-text-dim">
+                  <span className="text-text-muted">data_mode</span> is RYO&apos;s own provenance
+                  field. Kura did not generate this value — it read it, and refused to size capital
+                  against it.
+                </p>
+              ) : null}
             </Panel>
           ) : null}
         </div>

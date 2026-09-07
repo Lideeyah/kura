@@ -59,7 +59,10 @@ GATE TIME 57µs   ROUND TRIP 1.49ms   UPSTREAM STATUS ok   DATA MODE live
 ⚠ **Read the gate time off the screen.** It varies 20–80 µs warm. Say "tens of
 microseconds" if you'd rather not chase a number.
 
-**[0:24]** Click the **EVIDENCE FLOOR** row to expand it.
+**[0:24]** Click the **EVIDENCE FLOOR** row to expand it, then **scroll down far enough
+to show the whole JSON block and the sizing note under it** — at 1080p the payload runs
+below the fold. Hold it, then scroll straight back to the top so the candidate bar and
+Evaluate button are on screen for the next step.
 
 > "Every gate shows the exact field it read. This one resolved price and ATR-14 out of
 > the live payload — and if it couldn't find them, it vetoes rather than substituting a
@@ -85,7 +88,7 @@ AVAX/USDC   APPROVED   51.882% of bankroll cap
 
 > "Four injectors, each mapped to a real upstream failure mode."
 
-**[0:45]** Fire **Simulate Upstream Rate Limit → Inject**.
+**[0:45]** Fire **Rate-limit the upstream → Inject**.
 
 ⚠ **This takes about two seconds of visible waiting — that is the point, not a stall.**
 Narrate straight through it:
@@ -114,7 +117,7 @@ FRESHNESS breached: 2007.69 ms > 1200 ms (UPSTREAM_RATE_LIMITED)
 > reason names the cause. It doesn't just say 'slow', it says rate-limited, so nobody
 > goes hunting for a network fault that isn't there."
 
-**[1:08]** Fire **Mock Synthetic Feed → Inject**.
+**[1:08]** Fire **Mark the feed non-live → Inject**.
 
 ```
 SOL   VETO_HALT   breaker 76µs   PROVENANCE
@@ -213,9 +216,12 @@ persuasive work in the whole video.
 
 - **Don't say "honeypot detection" or "liquidity floor."** Those gates were built against
   a `check_safety` tool RYO does not publish, and were removed. Trivially disprovable.
-- **Don't call the conformance peer a mock.** It is a real MCP server over real stdio
-  publishing the real envelope. Say "local conformance peer" — and if pressed, the engine
-  has no offline mode and fails loudly when its configured peer is unreachable.
+- **Don't call the conformance peer a mock**, and don't say "simulate" about the chaos
+  injectors. Both undercut the entire pitch. The peer is a real MCP server over real
+  stdio publishing the real envelope; the injectors apply real faults to the live
+  transport. The one place `simulated` appears on screen is the value of RYO's own
+  `data_mode` field — say "RYO is telling us this reading isn't live, and Kura refuses
+  it", never "we simulated the data".
 - **Don't say the ledger proves the data is true.** It proves what the agent observed and
   that the record wasn't altered afterwards. There is no signature from RYO. That boundary
   is written up in the README's Threat Model section, and saying it out loud reads as
