@@ -3,6 +3,7 @@ import type { ToolName } from '../schema/tools.js';
 export type EngineErrorCode =
   | 'TRANSPORT_DROPPED'
   | 'UPSTREAM_TIMEOUT'
+  | 'UPSTREAM_RATE_LIMITED'
   | 'TRANSPORT_ERROR'
   | 'NOT_CONNECTED'
   | 'TOOL_ERROR'

@@ -218,3 +218,20 @@ describe('hyper-volatility refusal and the illustrative framing', () => {
     expect(previous).toBe(0);
   });
 });
+
+describe('fault attribution on a slow round-trip', () => {
+  it('names the underlying fault when latency breached because of one', () => {
+    const v = evaluate({
+      token: 'SOL', latencyMs: 2004, envelope: null, signals: null,
+      fault: { code: 'UPSTREAM_RATE_LIMITED', message: 'retry budget exhausted' },
+    });
+    expect(v.failedInvariant).toBe('FRESHNESS');
+    expect(v.reason).toContain('UPSTREAM_RATE_LIMITED');
+  });
+
+  it('reports a plain breach when latency was slow for no attributable reason', () => {
+    const v = evaluate({ token: 'SOL', latencyMs: 2004, envelope: env(), signals: sig() });
+    expect(v.reason).toContain('FRESHNESS breached');
+    expect(v.reason).not.toContain('(');
+  });
+});

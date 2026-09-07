@@ -239,30 +239,27 @@ npm run dev
 Engine on `:4000`, dashboard on `:3000` (Next proxies `/api/*` through, so SSE is
 same-origin).
 
-The terminal is a three-tier grid on a 1440px canvas:
+The console is four routes behind a persistent shell, each answering one question:
 
-- **Tool ribbon** — 7 micro-cards with live latency. Emerald under 400 ms, amber to the
-  1,200 ms ceiling, rose on any drop, timeout or schema break. A chaos-targeted tool
-  flips to rose on its next pulse, which is the fastest visible proof the injector
-  reached the transport rather than the UI.
-- **Invariant decision gate (60%)** — verdict, sizing, and the four gates in evaluation
-  order. Gates the breaker skipped render dimmed as `SHORT-CIRCUITED`, so it is visible
-  that missing data never ran fallback logic. Below them, a fault tape of the structured
-  errors the interceptor raised.
-- **Adversarial chaos injector (40%)** — drop, delay and malformed-payload triggers, plus
-  benchmark diagnostics. Those figures are read live from the stream and imported from
-  `bench-resilience.json`; none are transcribed into the component.
-- **Flight recorder** — the streaming ledger. `inspect` opens a fixed right drawer at
-  `z-50` showing the SHA-256 parent linkage, the canonical raw payload the hash covers,
-  a live recompute, and the exact `verify_provenance` command for that receipt. Because
-  the drawer is fixed rather than in flow, opening it causes zero layout shift.
+| Route | Question it answers |
+|---|---|
+| `/` | What is this? Static landing page — headline, three pillars, one CTA. |
+| `/app/evaluator` | Would this candidate pass? Symbol in, verdict out, with a four-gate matrix whose rows expand to show the exact JSON field that decided each one. |
+| `/app/chaos` | What happens when it breaks? Four injectors mapped to real production failure modes, beside the verified recovery numbers. |
+| `/app/ledger` | Can I prove what happened? Chain-health bar, one-click integrity check, paginated append-only table, and a per-block drawer with the full hash linkage. |
+| `/app/integration` | How do I wire my agent in? Copy-paste daemon command and MCP config for both transports. |
+
+The Evaluator and Chaos Lab render the verdict from *their own* request rather than the
+newest event on the shared SSE stream — the autonomous loop publishes there too, and
+reading it would answer a question the operator did not ask.
 
 Design tokens live in [`apps/web/tailwind.config.ts`](apps/web/tailwind.config.ts).
-Three accents carry meaning and nothing else — emerald healthy, amber degraded, rose
-halted — and a short-circuited gate is deliberately colourless, because it made no claim
-either way. Geist Sans (self-hosted via Vercel's `geist` package) sets the interface;
-JetBrains Mono with `tabular-nums` sets every latency, timestamp, sequence and hash, so
-columns do not jitter as the stream updates.
+The accent names are semantic rather than chromatic — there is no `green` or `red` to
+reach for, only `approved` and `veto` — so the colour discipline is enforced by the
+class name instead of by memory. A short-circuited gate is deliberately colourless,
+because it made no claim either way. Geist Sans sets the interface; JetBrains Mono with
+`tabular-nums` is reserved for hashes, timestamps and terminal blocks, so columns do not
+jitter as the stream updates.
 
 ---
 

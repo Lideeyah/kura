@@ -4,7 +4,13 @@ import type { LedgerRecord } from '../ledger/ledger.js';
 import type { ArbiterVerdict } from '../arbiter/invariants.js';
 import type { BackoffEvent } from '../mcp/retry.js';
 
-export type CallStatus = 'OK' | 'DROPPED' | 'TIMEOUT' | 'SCHEMA_MISMATCH_OR_MISSING_FIELD' | 'TRANSPORT_ERROR';
+export type CallStatus =
+  | 'OK'
+  | 'DROPPED'
+  | 'TIMEOUT'
+  | 'RATE_LIMITED'
+  | 'SCHEMA_MISMATCH_OR_MISSING_FIELD'
+  | 'TRANSPORT_ERROR';
 
 export interface ToolPulse {
   tool: ToolName;
@@ -16,7 +22,7 @@ export interface ToolPulse {
 
 export interface ChaosState {
   tool: ToolName | '*';
-  action: 'DROP' | 'DELAY' | 'RESET';
+  action: 'DROP' | 'DELAY' | 'DEGRADE_STATUS' | 'DEGRADE_MODE' | 'RATE_LIMIT' | 'RESET';
   delayMs?: number;
 }
 

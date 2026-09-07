@@ -117,6 +117,7 @@ export function buildServer(sup: Supervisor) {
 
   app.get('/api/chaos', async () => ({ chaos: sup.chaos.snapshot() }));
 
+
   app.post<{ Body: { tool?: string; action?: string; delayMs?: number } }>(
     '/api/chaos/toggle',
     async (req, reply) => {
@@ -124,13 +125,14 @@ export function buildServer(sup: Supervisor) {
       if (typeof tool !== 'string' || (tool !== '*' && !isToolName(tool))) {
         return reply.code(400).send({ error: 'BAD_TOOL', allowed: ['*', ...TOOL_NAMES] });
       }
-      if (action !== 'DROP' && action !== 'DELAY' && action !== 'RESET') {
-        return reply.code(400).send({ error: 'BAD_ACTION', allowed: ['DROP', 'DELAY', 'RESET'] });
+      const ALLOWED = ['DROP', 'DELAY', 'DEGRADE_STATUS', 'DEGRADE_MODE', 'RATE_LIMIT', 'RESET'];
+      if (typeof action !== 'string' || !ALLOWED.includes(action)) {
+        return reply.code(400).send({ error: 'BAD_ACTION', allowed: ALLOWED });
       }
       if (action === 'DELAY' && (typeof delayMs !== 'number' || !Number.isFinite(delayMs) || delayMs < 0)) {
         return reply.code(400).send({ error: 'BAD_DELAY_MS' });
       }
-      sup.chaos.set(tool as '*', action, delayMs);
+      sup.chaos.set(tool as '*', action as never, delayMs);
       return { ok: true, chaos: sup.chaos.snapshot() };
     },
   );
@@ -145,6 +147,21 @@ export function buildServer(sup: Supervisor) {
   });
 
   app.get('/api/verify/chain', async () => sup.ledger.verifyChain());
+
+  /** Headline numbers for the Audit Ledger chain-health bar. */
+  app.get('/api/ledger/stats', async () => {
+    const rows = sup.ledger.list(100_000);
+    const head = sup.ledger.head();
+    return {
+      total: rows.length,
+      approved: rows.filter((r) => r.decision === 'APPROVED').length,
+      vetoed: rows.filter((r) => r.decision === 'VETOED').length,
+      headBlockHash: head?.block_hash ?? null,
+      headSeq: head?.seq ?? 0,
+      journalMode: sup.ledger.journalMode,
+      ledgerPath: config.ledger.path,
+    };
+  });
 
   app.post<{ Body: { symbol?: string } }>('/api/evaluate', async (req, reply) => {
     const symbol = req.body?.symbol ?? sup.tokens[0]?.symbol;

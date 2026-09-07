@@ -17,7 +17,7 @@ const jetbrainsMono = JetBrains_Mono({
 });
 
 export const metadata: Metadata = {
-  title: 'KURA // Flight Terminal',
+  title: 'Kura — Deterministic Execution Firewall',
   description:
     'Deterministic invariant arbiter and tamper-evident decision ledger for the RYO-CHAN MCP toolset.',
 };
@@ -25,7 +25,7 @@ export const metadata: Metadata = {
 export const viewport: Viewport = {
   width: 'device-width',
   initialScale: 1,
-  themeColor: '#08090C',
+  themeColor: '#09090b',
 };
 
 export default function RootLayout({ children }: { children: ReactNode }) {

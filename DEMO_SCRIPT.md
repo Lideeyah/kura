@@ -46,7 +46,7 @@ Type `SOL` and click **Evaluate**.
 
 **Expect on screen:**
 ```
-TARGET   SOL/USDC          VERDICT  APPROVED        SIZING  5.000%  $5,000
+TARGET   SOL/USDC   VERDICT  APPROVED   SIZING ALLOCATION  100.000% of bankroll cap
 ✓ FRESHNESS          rtt 1.2 ms, as_of 12000 ms old
 ✓ ORACLE INTEGRITY   ok
 ✓ DATA PROVENANCE    live
@@ -103,7 +103,7 @@ Click **Evaluate**.
 
 **Expect on screen:**
 ```
-TARGET   SOL/USDC          VERDICT  VETO_HALT       SIZING  0.000%  no capital at risk
+TARGET   SOL/USDC   VERDICT  VETO_HALT  SIZING ALLOCATION  0.000% capital protected
 ✓ FRESHNESS          rtt 15.3 ms  →  then FAIL: no envelope (TRANSPORT_DROPPED)
 — ORACLE INTEGRITY   SHORT-CIRCUITED
 — DATA PROVENANCE    SHORT-CIRCUITED

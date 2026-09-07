@@ -283,3 +283,56 @@ describe('ledger API', () => {
     expect((await jsonOf(res)).failures).toEqual(['RECEIPT_NOT_FOUND']);
   });
 });
+
+describe('chaos: envelope degradation and real rate limiting', () => {
+  it('DEGRADE_STATUS forces a partial upstream and vetoes on ORACLE', async () => {
+    await post('/api/chaos/toggle', { tool: 'analyze_token', action: 'DEGRADE_STATUS' });
+    const res = await post('/api/evaluate', { symbol: 'SOL' }).then(jsonOf);
+    expect(res.verdict.decision).toBe('VETOED');
+    expect(res.verdict.failedInvariant).toBe('ORACLE');
+    expect(res.verdict.status).toBe('partial');
+    await post('/api/chaos/toggle', { tool: '*', action: 'RESET' });
+  });
+
+  it('DEGRADE_MODE forces simulated provenance and vetoes on PROVENANCE', async () => {
+    await post('/api/chaos/toggle', { tool: 'analyze_token', action: 'DEGRADE_MODE' });
+    const res = await post('/api/evaluate', { symbol: 'SOL' }).then(jsonOf);
+    expect(res.verdict.decision).toBe('VETOED');
+    expect(res.verdict.failedInvariant).toBe('PROVENANCE');
+    expect(res.verdict.dataMode).toBe('simulated');
+    await post('/api/chaos/toggle', { tool: '*', action: 'RESET' });
+  });
+
+  it('RATE_LIMIT drives the real retry wrapper against a real 429 and reports backoffs', async () => {
+    const before = tap.of('rate_limit').length;
+    await post('/api/chaos/toggle', { tool: 'analyze_token', action: 'RATE_LIMIT' });
+    const res = await post('/api/evaluate', { symbol: 'SOL' }).then(jsonOf);
+
+    expect(res.verdict.decision).toBe('VETOED');
+    // The retries genuinely waited out two Retry-After periods, so the round-trip
+    // really did breach the freshness budget — and the reason names the cause rather
+    // than sending an operator hunting for a network fault.
+    expect(res.verdict.failedInvariant).toBe('FRESHNESS');
+    expect(res.verdict.reason).toContain('UPSTREAM_RATE_LIMITED');
+    expect(res.verdict.latencyMs).toBeGreaterThan(1200);
+
+    // Real backoff events, from the same code that wraps production HTTP requests.
+    const backoff = await tap.waitFor(
+      (e) => e.type === 'rate_limit' && tap.of('rate_limit').length > before,
+    );
+    expect(backoff.data.backoff.reason).toBe('RATE_LIMITED');
+    expect(backoff.data.backoff.status).toBe(429);
+    expect(backoff.data.backoff.fromRetryAfter).toBe(true);
+    expect(backoff.data.backoff.rateLimit.limit).toBe(1000);
+
+    await post('/api/chaos/toggle', { tool: '*', action: 'RESET' });
+  });
+
+  it('exposes ledger stats for the chain-health bar', async () => {
+    const stats = await getJson('/api/ledger/stats');
+    expect(stats.total).toBeGreaterThan(0);
+    expect(stats.approved + stats.vetoed).toBe(stats.total);
+    expect(stats.headBlockHash).toHaveLength(64);
+    expect(stats.journalMode).toBe('wal');
+  });
+});

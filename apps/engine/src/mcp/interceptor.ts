@@ -7,6 +7,7 @@ import {
   type ToolName,
 } from '../schema/tools.js';
 import { EngineError } from './errors.js';
+import { createRetryingFetch } from './retry.js';
 import type { RyoClient } from './client.js';
 
 export interface CallResult {
@@ -18,7 +19,15 @@ export interface CallResult {
   status: 'OK';
 }
 
-type ChaosEntry = { action: 'DROP' | 'DELAY'; delayMs?: number };
+export type ChaosAction =
+  | 'DROP'
+  | 'DELAY'
+  | 'DEGRADE_STATUS'
+  | 'DEGRADE_MODE'
+  | 'RATE_LIMIT'
+  | 'RESET';
+
+type ChaosEntry = { action: Exclude<ChaosAction, 'RESET'>; delayMs?: number };
 
 const sleep = (ms: number) => new Promise<void>((r) => setTimeout(r, ms));
 
@@ -26,7 +35,7 @@ const sleep = (ms: number) => new Promise<void>((r) => setTimeout(r, ms));
 export class ChaosController {
   private readonly state = new Map<ToolName | '*', ChaosEntry>();
 
-  set(tool: ToolName | '*', action: 'DROP' | 'DELAY' | 'RESET', delayMs?: number): void {
+  set(tool: ToolName | '*', action: ChaosAction, delayMs?: number): void {
     if (action === 'RESET') {
       if (tool === '*') this.state.clear();
       else this.state.delete(tool);
@@ -46,6 +55,10 @@ export class ChaosController {
       action: entry.action,
       ...(entry.delayMs === undefined ? {} : { delayMs: entry.delayMs }),
     }));
+  }
+
+  get active(): boolean {
+    return this.state.size > 0;
   }
 
   clear(): void {
@@ -126,6 +139,33 @@ export class InterceptedRyo {
         });
       }
 
+      if (entry?.action === 'RATE_LIMIT') {
+        // Drives the *production* retry wrapper — same createRetryingFetch, same policy,
+        // same Retry-After parsing, same full-jitter curve, same telemetry. Only the
+        // socket is substituted: the injected transport returns a genuine 429 Response
+        // with genuine headers, so no port coupling and no assumption about where this
+        // process happens to be listening. The identical function is driven over a real
+        // HTTP socket in test/retry.test.ts.
+        const limiter = createRetryingFetch({
+          policy: { maxAttempts: 3, baseDelayMs: 250 },
+          fetchImpl: async () =>
+            new Response(JSON.stringify({ error: 'rate_limited' }), {
+              status: 429,
+              headers: {
+                'Retry-After': '1',
+                'X-RateLimit-Limit': '1000',
+                'X-RateLimit-Remaining': '0',
+              },
+            }),
+        });
+        const res = await limiter('https://upstream.invalid/mcp');
+        throw new EngineError(
+          'UPSTREAM_RATE_LIMITED',
+          `${tool} exhausted its retry budget against HTTP ${res.status} from the upstream`,
+          { tool, latencyMs: performance.now() - started },
+        );
+      }
+
       if (entry?.action === 'DELAY') {
         const delayMs = Math.max(0, entry.delayMs ?? 0);
         // Never sleep past the hard ceiling — surface the timeout instead of hanging.
@@ -145,7 +185,14 @@ export class InterceptedRyo {
         timeoutMs: config.mcp.requestTimeoutMs,
       });
       const raw = unwrapEnvelope(tool, envelope);
-      const payload = validateEnvelope(tool, raw);
+      let payload = validateEnvelope(tool, raw);
+
+      // Envelope degradation is applied after validation, so the arbiter sees exactly
+      // the shape a genuinely degraded upstream would produce. Unlike the profile
+      // fixtures this also works against live RYO.
+      if (entry?.action === 'DEGRADE_STATUS') payload = { ...payload, status: 'partial' };
+      if (entry?.action === 'DEGRADE_MODE') payload = { ...payload, data_mode: 'simulated' };
+
       const latencyMs = performance.now() - started;
 
       this.pulse(tool, latencyMs, 'OK');
@@ -178,6 +225,7 @@ function statusOf(err: unknown): CallStatus {
   if (err instanceof EngineError) {
     if (err.code === 'TRANSPORT_DROPPED') return 'DROPPED';
     if (err.code === 'UPSTREAM_TIMEOUT') return 'TIMEOUT';
+    if (err.code === 'UPSTREAM_RATE_LIMITED') return 'RATE_LIMITED';
   }
   return 'TRANSPORT_ERROR';
 }

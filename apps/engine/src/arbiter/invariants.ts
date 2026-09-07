@@ -130,8 +130,11 @@ export function evaluate(input: ArbiterInput): ArbiterVerdict {
     results.push(skip('ORACLE', oraclePredicate, "status === 'ok'"));
     results.push(skip('PROVENANCE', provenancePredicate, "data_mode === 'live'"));
     results.push(skip('EVIDENCE', evidencePredicate, 'price and ATR(14) present'));
+    // When a fault caused the slow round-trip, name it. "Latency breached" alone sends
+    // an operator hunting for a network problem that is really a rate limit.
+    const cause = input.fault ? ` (${input.fault.code})` : '';
     const why = !rttOk
-      ? `FRESHNESS breached: ${round2(input.latencyMs)} ms > ${maxLatencyMs} ms`
+      ? `FRESHNESS breached: ${round2(input.latencyMs)} ms > ${maxLatencyMs} ms${cause}`
       : env === null
         ? `FRESHNESS unavailable: ${input.fault?.code ?? 'NO_PAYLOAD'} — ${input.fault?.message ?? 'no envelope'}`
         : `FRESHNESS breached: observation ${ageMs === null ? 'unparseable' : `${round2(ageMs)} ms old`}`;
@@ -201,7 +204,8 @@ export function evaluate(input: ArbiterInput): ArbiterVerdict {
   const sizing = sizePosition(signals);
   return finish(
     null,
-    `all 4 invariants satisfied — fractional Kelly size $${sizing.positionUsd.toFixed(2)} (${(sizing.fraction * 100).toFixed(3)}% of bankroll)`,
+    `all 4 invariants satisfied — illustrative allocation ${sizing.pctOfCap.toFixed(1)}% of cap ` +
+      `(${(sizing.fraction * 100).toFixed(3)}% of bankroll)`,
     sizing,
   );
 }

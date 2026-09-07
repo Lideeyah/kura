@@ -13,38 +13,29 @@
 
   body {
     @apply bg-canvas text-text-primary font-sans antialiased;
-    /* Telemetry surfaces read as instrumentation, not documents. */
-    font-feature-settings: 'cv01', 'ss01';
   }
 
-  /* Every numeric readout on this page updates from the SSE stream several times a
-     second. Without fixed-advance digits the columns jitter on every frame. */
+  /* Monospace is reserved for hashes, timestamps, and terminal blocks. Tabular figures
+     keep those columns from jittering as the stream updates. */
   .tnum {
     @apply font-mono tabular-nums;
     font-variant-numeric: tabular-nums;
   }
 
   ::selection {
-    background-color: rgba(16, 185, 129, 0.25);
+    background-color: rgba(90, 161, 127, 0.25);
   }
 
   ::-webkit-scrollbar {
     width: 10px;
     height: 10px;
   }
-  ::-webkit-scrollbar-track {
-    background: theme('colors.canvas');
-  }
-  ::-webkit-scrollbar-thumb {
-    background: theme('colors.border');
-    border-radius: 9999px;
-  }
-  ::-webkit-scrollbar-thumb:hover {
-    background: theme('colors.border-bright');
-  }
+  ::-webkit-scrollbar-track { background: theme('colors.canvas'); }
+  ::-webkit-scrollbar-thumb { background: theme('colors.border'); border-radius: 9999px; }
+  ::-webkit-scrollbar-thumb:hover { background: theme('colors.border-strong'); }
 
   :focus-visible {
-    outline: 1px solid theme('colors.border-bright');
+    outline: 1px solid theme('colors.border-strong');
     outline-offset: 2px;
   }
 }
