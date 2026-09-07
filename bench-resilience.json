@@ -1,0 +1,42 @@
+{
+  "generatedAt": "2026-09-07T08:22:15.681Z",
+  "trialsPerClass": 50,
+  "reports": [
+    {
+      "fault": "latency_spike",
+      "trials": 50,
+      "detectionRate": 1,
+      "recoveryRate": 1,
+      "medianMs": 1.61,
+      "p95Ms": 2.4,
+      "minMs": 0.68,
+      "maxMs": 3.13
+    },
+    {
+      "fault": "malformed_payload",
+      "trials": 50,
+      "detectionRate": 1,
+      "recoveryRate": 1,
+      "medianMs": 0.65,
+      "p95Ms": 1.68,
+      "minMs": 0.38,
+      "maxMs": 5.62
+    },
+    {
+      "fault": "peer_crash",
+      "trials": 50,
+      "detectionRate": 1,
+      "recoveryRate": 1,
+      "medianMs": 519.76,
+      "p95Ms": 543.03,
+      "minMs": 503.07,
+      "maxMs": 702.19
+    }
+  ],
+  "chain": {
+    "valid": true,
+    "length": 300,
+    "brokenAtSeq": null,
+    "failures": []
+  }
+}

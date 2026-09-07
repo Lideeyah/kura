@@ -1,0 +1,21 @@
+{
+  "name": "kura",
+  "private": true,
+  "version": "0.1.0",
+  "workspaces": [
+    "apps/engine",
+    "apps/web"
+  ],
+  "scripts": {
+    "dev": "sh -c 'trap \"kill 0\" EXIT INT TERM; npm run dev:engine & npm run dev:web & wait'",
+    "dev:engine": "npm run dev --workspace=apps/engine",
+    "dev:web": "npm run dev --workspace=apps/web",
+    "test": "npm run test --workspace=apps/engine",
+    "typecheck": "npm run typecheck --workspace=apps/engine && npm run typecheck --workspace=apps/web",
+    "test:resilience": "npm run test:resilience --workspace=apps/engine",
+    "verify": "python3 skills/verify_provenance/tool.py --all",
+    "conformance": "npm run conformance --workspace=apps/engine",
+    "build": "npm run build --workspace=apps/web",
+    "demo": "npm run demo --workspace=apps/engine"
+  }
+}

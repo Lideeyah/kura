@@ -1,0 +1,108 @@
+export const TOOL_NAMES = [
+  'market_overview',
+  'scan_market',
+  'analyze_token',
+  'deep_analysis',
+  'compare_tokens',
+  'check_safety',
+  'supported_tokens',
+] as const;
+
+export type ToolName = (typeof TOOL_NAMES)[number];
+
+export type CallStatus =
+  | 'OK'
+  | 'DROPPED'
+  | 'TIMEOUT'
+  | 'SCHEMA_MISMATCH_OR_MISSING_FIELD'
+  | 'TRANSPORT_ERROR';
+
+export interface ToolPulse {
+  tool: ToolName;
+  latencyMs: number;
+  status: CallStatus;
+  at: string;
+  detail?: string;
+}
+
+export type InvariantId = 'LATENCY' | 'ORACLE' | 'HONEYPOT' | 'LIQUIDITY';
+export type InvariantState = 'PASS' | 'FAIL' | 'NOT_EVALUATED';
+
+export interface InvariantResult {
+  id: InvariantId;
+  predicate: string;
+  state: InvariantState;
+  expected: string;
+  actual: string;
+  detail: string;
+}
+
+export interface KellySizing {
+  p: number;
+  b: number;
+  fullKelly: number;
+  fraction: number;
+  positionUsd: number;
+  bankrollUsd: number;
+  inputs: { liquidityScore: number; volumeScore: number; safetyScore: number; confidence: number };
+  clampedBy: string;
+}
+
+export interface ArbiterVerdict {
+  token: string;
+  decision: 'APPROVED' | 'VETOED';
+  reason: string;
+  failedInvariant: InvariantId | null;
+  invariants: InvariantResult[];
+  sizing: KellySizing | null;
+  latencyMs: number;
+  evaluationMicros: number;
+  at: string;
+}
+
+export interface LedgerRecord {
+  seq: number;
+  receipt_id: string;
+  timestamp: string;
+  token: string;
+  decision: 'APPROVED' | 'VETOED';
+  reason: string;
+  latency_ms: number;
+  position_usd: number;
+  invariants_json: string;
+  raw_payload_json: string;
+  payload_hash: string;
+  prev_block_hash: string;
+  block_hash: string;
+}
+
+export interface ChaosState {
+  tool: ToolName | '*';
+  action: 'DROP' | 'DELAY' | 'RESET';
+  delayMs?: number;
+}
+
+export type TelemetryEvent =
+  | { type: 'hello'; connected: boolean; ledgerCount: number; chaos: ChaosState[]; at: string }
+  | { type: 'tool_pulse'; pulse: ToolPulse }
+  | { type: 'connection'; connected: boolean; transport: string; detail?: string; at: string }
+  | { type: 'verdict'; verdict: ArbiterVerdict }
+  | { type: 'ledger'; record: LedgerRecord }
+  | { type: 'chaos'; chaos: ChaosState[]; at: string }
+  | { type: 'error'; code: string; message: string; tool?: ToolName; at: string };
+
+export interface VerificationResult {
+  receipt_id: string;
+  valid: boolean;
+  failures: string[];
+  seq: number | null;
+  recomputed_payload_hash: string | null;
+  stored_payload_hash: string | null;
+  recomputed_block_hash: string | null;
+  stored_block_hash: string | null;
+  parent_receipt_id: string | null;
+  parent_block_hash: string | null;
+  stored_prev_block_hash: string | null;
+  is_genesis: boolean;
+  elapsed_ms: number;
+}

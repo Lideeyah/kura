@@ -1,0 +1,50 @@
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+@layer base {
+  :root {
+    color-scheme: dark;
+  }
+
+  html {
+    background-color: theme('colors.canvas');
+  }
+
+  body {
+    @apply bg-canvas text-text-primary font-sans antialiased;
+    /* Telemetry surfaces read as instrumentation, not documents. */
+    font-feature-settings: 'cv01', 'ss01';
+  }
+
+  /* Every numeric readout on this page updates from the SSE stream several times a
+     second. Without fixed-advance digits the columns jitter on every frame. */
+  .tnum {
+    @apply font-mono tabular-nums;
+    font-variant-numeric: tabular-nums;
+  }
+
+  ::selection {
+    background-color: rgba(16, 185, 129, 0.25);
+  }
+
+  ::-webkit-scrollbar {
+    width: 10px;
+    height: 10px;
+  }
+  ::-webkit-scrollbar-track {
+    background: theme('colors.canvas');
+  }
+  ::-webkit-scrollbar-thumb {
+    background: theme('colors.border');
+    border-radius: 9999px;
+  }
+  ::-webkit-scrollbar-thumb:hover {
+    background: theme('colors.border-bright');
+  }
+
+  :focus-visible {
+    outline: 1px solid theme('colors.border-bright');
+    outline-offset: 2px;
+  }
+}
