@@ -2,6 +2,7 @@ import { EventEmitter } from 'node:events';
 import type { ToolName } from '../schema/tools.js';
 import type { LedgerRecord } from '../ledger/ledger.js';
 import type { ArbiterVerdict } from '../arbiter/invariants.js';
+import type { BackoffEvent } from '../mcp/retry.js';
 
 export type CallStatus = 'OK' | 'DROPPED' | 'TIMEOUT' | 'SCHEMA_MISMATCH_OR_MISSING_FIELD' | 'TRANSPORT_ERROR';
 
@@ -26,6 +27,7 @@ export type TelemetryEvent =
   | { type: 'verdict'; verdict: ArbiterVerdict }
   | { type: 'ledger'; record: LedgerRecord }
   | { type: 'chaos'; chaos: ChaosState[]; at: string }
+  | { type: 'rate_limit'; backoff: BackoffEvent }
   | { type: 'error'; code: string; message: string; tool?: ToolName; at: string };
 
 /**

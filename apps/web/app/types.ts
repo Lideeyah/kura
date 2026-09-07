@@ -45,6 +45,7 @@ export interface KellySizing {
   fraction: number;
   positionUsd: number;
   bankrollUsd: number;
+  pctOfCap: number;
   inputs: { volatilityScore: number; completenessScore: number; confidence: number; atrPct: number };
   clampedBy: string;
 }
@@ -86,6 +87,25 @@ export interface ChaosState {
   delayMs?: number;
 }
 
+export interface BackoffEvent {
+  attempt: number;
+  ofAttempts: number;
+  delayMs: number;
+  reason: 'RATE_LIMITED' | 'UPSTREAM_UNAVAILABLE' | 'NETWORK_ERROR';
+  status: number | null;
+  fromRetryAfter: boolean;
+  rateLimit: { limit: number | null; remaining: number | null; reset: number | null } | null;
+  at: string;
+}
+
+export interface EvidenceProbe {
+  resolved: boolean;
+  pricePath: string | null;
+  atrPath: string | null;
+  rsiPath: string | null;
+  detail: string;
+}
+
 export type TelemetryEvent =
   | { type: 'hello'; connected: boolean; ledgerCount: number; chaos: ChaosState[]; at: string }
   | { type: 'tool_pulse'; pulse: ToolPulse }
@@ -93,6 +113,7 @@ export type TelemetryEvent =
   | { type: 'verdict'; verdict: ArbiterVerdict }
   | { type: 'ledger'; record: LedgerRecord }
   | { type: 'chaos'; chaos: ChaosState[]; at: string }
+  | { type: 'rate_limit'; backoff: BackoffEvent }
   | { type: 'error'; code: string; message: string; tool?: ToolName; at: string };
 
 export interface VerificationResult {

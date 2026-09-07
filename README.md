@@ -16,6 +16,54 @@ transport, and the terminal now carries its full visual identity.**
 
 ---
 
+## Threat model and trust assumptions
+
+KURA is **agent black-box auditing and deterministic circuit breaking**. It is not a
+decentralised oracle and it does not attest to market truth. Stating the boundary
+precisely is what makes the guarantee worth anything.
+
+### What KURA proves
+
+1. **What the agent observed** — the exact bytes RYO returned, hashed with SHA-256 over
+   a canonical serialization.
+2. **When it observed them** — the observation timestamp and the commit timestamp, both
+   inside the hashed block.
+3. **That the invariants were evaluated before any downstream handoff** — the verdict
+   and every gate's empirical value live in the same hashed block as the payload that
+   produced them. You cannot have the decision without the evidence it rests on.
+4. **That the trail was not altered afterwards** — each block links to its predecessor,
+   so editing any historical record breaks the chain at that exact block, provably and
+   locally, and a standalone Python verifier confirms it independently.
+
+### What KURA does not prove
+
+1. **That RYO's data is correct.** KURA reads `status`, `data_mode` and `as_of` and
+   refuses on anything but a complete live read. It cannot tell you whether a live read
+   is *right*.
+2. **That the recorded payload came from RYO.** There is no response signature from RYO,
+   so the chain is written and attested by the engine itself. Anyone who controls the
+   engine's configuration can point `RYO_MCP_URL` at a different MCP peer and mint a
+   perfectly verifiable chain of fabricated observations. This is demonstrable in about
+   twelve lines, and pretending otherwise would be the single easiest claim in this
+   project to disprove.
+3. **That the agent obeyed the verdict.** KURA has no execution path. Whether a
+   downstream system honours a `VETO_HALT` is outside its control and outside its claims.
+
+### Adversary model
+
+| | |
+|---|---|
+| **Defends against** | Post-hoc tampering with the audit trail by anyone without the engine. Silent upstream degradation — stale, incomplete or simulated data passing unnoticed. An operator's own faulty recollection of what the agent saw. |
+| **Does not defend against** | A malicious operator at configuration time. A compromised or impersonated RYO endpoint. A compromised host. |
+
+### What would close the gap
+
+Response signing by RYO, or anchoring block hashes to an external timestamping
+authority. Both require cooperation KURA cannot provide unilaterally, so neither is
+claimed here.
+
+---
+
 ## The thesis, in three claims
 
 ### 1. The gate is algorithmic, not probabilistic
@@ -243,6 +291,51 @@ TRIALS=10 npm run test:resilience
 
 ---
 
+## Upstream failure handling
+
+The guide names 429 as the failure builders should expect, with `Retry-After`,
+`X-RateLimit-*` headers, and "exponential backoff with jitter for 429, 503, and
+temporary network errors" — while forbidding retries of invalid arguments or unknown
+tools. [`apps/engine/src/mcp/retry.ts`](apps/engine/src/mcp/retry.ts) wraps every HTTP
+request the SDK makes:
+
+- **429 and 503 are retried.** `Retry-After` is honoured in both its forms —
+  delta-seconds and HTTP-date — and capped at `RYO_RETRY_MAX_DELAY_MS`.
+- **Everything else comes straight back.** A 400 is a bug in the request; a 401 is a
+  credential problem that waiting cannot fix. Neither is retried.
+- **Full jitter, not equal jitter.** The wait is uniform in `[0, min(cap, base·2^n)]`.
+  Equal jitter still leaves every client's retries clustered after a shared outage;
+  full jitter spreads them across the whole window, which is the property that actually
+  prevents a thundering herd on recovery.
+- **Every backoff is reported** — attempt, delay, reason, status, whether the wait came
+  from the server or from our own curve, and the quota headers — onto the telemetry bus
+  and into the dashboard. A retry is never an untracked failure.
+
+[`test/retry.test.ts`](apps/engine/test/retry.test.ts) drives all of this against a real
+local HTTP server that really returns 429 with a real `Retry-After`, not a stubbed fetch.
+
+## Schema drift
+
+RYO's envelope is guaranteed; the inner `data` shape belongs to the live catalog. If a
+measurement moves, the naive outcome is silent total failure — `EVIDENCE` fails on every
+token, no error anywhere, and a green test suite.
+
+So the engine probes at boot, costing one tool call, and reports the paths it resolved:
+
+```
+[kura] evidence paths OK — resolved price at data.market.price_usd, ATR(14) at data.technicals.atr_14
+```
+
+and when they move:
+
+```
+[kura] SCHEMA RESOLUTION WARNING: Expected measurement paths not resolved; falling back to strict veto mode
+[kura] could not resolve price and ATR(14) in data — searched price_usd, price, current_price, ...
+```
+
+The warning also lands on `/api/health` and as a banner on the dashboard. Set
+`EVIDENCE_PROBE=0` to skip it.
+
 ## API
 
 | Method | Path | Purpose |
@@ -303,8 +396,18 @@ on the engine surfaces it next to the tool list KURA expects.
 
 ## Position sizing
 
-Approved trades are sized by fractional Kelly, deterministically — no model call, no
-randomness. Confidence is a fixed weighting of three observable quantities:
+**A heuristic volatility-adjusted sizing cap, not a theoretical Kelly proof.** Worth
+stating plainly, because the shape of the formula invites more credit than it deserves:
+real Kelly needs an estimated edge, and KURA has none. It has *"the evidence was
+complete and the asset was not too volatile"*, which is a statement about data quality,
+not expected return. The weights were chosen for sane behaviour, not fitted to a
+backtest. The dashboard leads with allocation as a percentage of the hard risk cap
+rather than a dollar figure, because the dollar figure implies a precision that is not
+there.
+
+What it *is*: deterministic, monotonic and auditable — no model call, no randomness, and
+the same inputs always produce the same allocation. Confidence is a fixed weighting of
+two observable quantities:
 
 ```
 volatilityScore   = 1 − atrPct / KELLY_MAX_ATR_PCT     (ATR(14) / price)
@@ -317,9 +420,15 @@ fraction   = min(KELLY_FRACTION · fullKelly, KELLY_MAX_POSITION_PCT), floored a
 ```
 
 Both inputs are measurements RYO actually returns. A more volatile asset earns a smaller
-position; thinner evidence earns a smaller position. An undeclarable availability map
-contributes **zero** confidence rather than full confidence — an unmeasured section
-never argues for a bigger bet.
+allocation; thinner evidence earns a smaller allocation. An undeclarable availability map
+contributes **zero** confidence rather than full confidence — an unmeasured section never
+argues for a bigger bet.
+
+At or above `KELLY_HYPER_VOL_ATR_PCT` (default 50% ATR/price) the model **refuses
+outright**. The volatility score already floors at zero at `KELLY_MAX_ATR_PCT`, so
+without an explicit cutoff an asset with an ATR of 500% of its own price would size
+identically to one at 15% — the model going blind exactly where the risk is most
+extreme. An asset whose daily true range approaches its own price is not a position.
 
 `p` is anchored at the break-even probability, so zero confidence yields exactly zero
 size rather than some residual floor. The `MAX_POSITION_PCT` clamp is a hard risk limit
@@ -331,7 +440,7 @@ one. All parameters are in `.env`.
 ## Tests
 
 ```bash
-npm test                # 63 tests
+npm test                # 103 tests
 npm run typecheck
 ```
 

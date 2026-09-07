@@ -4,6 +4,7 @@ import { FlightRecorder } from './ledger/ledger.js';
 import { RyoClient, transportSpecFromConfig, type RyoTransportSpec } from './mcp/client.js';
 import { ChaosController, InterceptedRyo } from './mcp/interceptor.js';
 import { evaluateToken, type EvaluationOutcome } from './pipeline.js';
+import { probeEvidence, type EvidenceProbe } from './arbiter/signals.js';
 import { TOOL_NAMES, type ToolName } from './schema/tools.js';
 
 export interface WatchToken {
@@ -29,6 +30,7 @@ export class Supervisor {
   private backoffMs = config.mcp.reconnectBackoffMs;
   private stopped = false;
   private lastConnectError: string | null = null;
+  private evidence: EvidenceProbe | null = null;
 
   constructor(spec: RyoTransportSpec = transportSpecFromConfig(), ledgerPath = config.ledger.path) {
     this.ledger = new FlightRecorder(ledgerPath);
@@ -53,6 +55,11 @@ export class Supervisor {
     return this.lastConnectError;
   }
 
+  /** Result of the boot-time measurement-path probe. */
+  get evidenceProbe(): EvidenceProbe | null {
+    return this.evidence;
+  }
+
   get tokens(): WatchToken[] {
     return this.watchlist;
   }
@@ -72,6 +79,7 @@ export class Supervisor {
       this.lastConnectError = null;
       this.backoffMs = config.mcp.reconnectBackoffMs;
       this.refreshWatchlist();
+      await this.probeEvidencePaths();
       return true;
     } catch (err) {
       this.lastConnectError = err instanceof Error ? err.message : String(err);
@@ -113,6 +121,46 @@ export class Supervisor {
    */
   private refreshWatchlist(): void {
     this.watchlist = config.watchlist.map((symbol) => ({ symbol }));
+  }
+
+  /**
+   * Boot-time schema resolution check.
+   *
+   * Costs exactly one tool call. Worth it: without it a change to RYO's `data` shape
+   * turns into silent, total refusal — every token vetoed on EVIDENCE, no error
+   * anywhere, and a green test suite. Set EVIDENCE_PROBE=0 to skip it.
+   */
+  private async probeEvidencePaths(): Promise<void> {
+    if (!config.telemetry.evidenceProbe) return;
+    const symbol = this.watchlist[0]?.symbol;
+    if (!symbol) return;
+    try {
+      const res = await this.ryo.call('analyze_token', { symbol });
+      this.evidence = probeEvidence(res.payload);
+    } catch (err) {
+      this.evidence = {
+        resolved: false,
+        pricePath: null,
+        atrPath: null,
+        rsiPath: null,
+        detail: `probe call failed: ${err instanceof Error ? err.message : String(err)}`,
+      };
+    }
+
+    if (this.evidence.resolved) {
+      process.stderr.write(`[kura] evidence paths OK — ${this.evidence.detail}\n`);
+    } else {
+      const warning =
+        'SCHEMA RESOLUTION WARNING: Expected measurement paths not resolved; ' +
+        'falling back to strict veto mode';
+      process.stderr.write(`[kura] ${warning}\n[kura] ${this.evidence.detail}\n`);
+      bus.publish({
+        type: 'error',
+        code: 'SCHEMA_RESOLUTION_WARNING',
+        message: `${warning} — ${this.evidence.detail}`,
+        at: new Date().toISOString(),
+      });
+    }
   }
 
   private pingArgs(tool: ToolName): Record<string, unknown> {

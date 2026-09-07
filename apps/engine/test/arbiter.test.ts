@@ -177,3 +177,44 @@ describe('fractional Kelly sizing', () => {
     expect(s.clampedBy).toBe('NON_POSITIVE_EDGE');
   });
 });
+
+describe('hyper-volatility refusal and the illustrative framing', () => {
+  it('refuses to size at all at or above the hyper-volatility threshold', () => {
+    const s = sizePosition(sig({ atrPct: 0.5, completeness: 1 }));
+    expect(s.clampedBy).toBe('HYPER_VOLATILITY');
+    expect(s.fraction).toBe(0);
+    expect(s.positionUsd).toBe(0);
+    expect(s.pctOfCap).toBe(0);
+  });
+
+  it('no longer treats a 500%-ATR asset the same as a 15% one', () => {
+    // The bug this closes: volatilityScore floors at zero at maxAtrPct, so without an
+    // explicit cutoff every asset beyond it sized identically — the model going blind
+    // exactly where the risk is most extreme.
+    const at15 = sizePosition(sig({ atrPct: 0.15, completeness: 1 }));
+    const at500 = sizePosition(sig({ atrPct: 5.0, completeness: 1 }));
+    expect(at15.positionUsd).toBeGreaterThan(0);
+    expect(at500.positionUsd).toBe(0);
+    expect(at500.clampedBy).toBe('HYPER_VOLATILITY');
+  });
+
+  it('reports allocation as a percentage of the hard cap', () => {
+    const capped = sizePosition(sig({ atrPct: 0.005, completeness: 1 }));
+    expect(capped.clampedBy).toBe('MAX_POSITION_PCT');
+    expect(capped.pctOfCap).toBe(100);
+
+    const partial = sizePosition(sig({ atrPct: 0.1, completeness: 1 }));
+    expect(partial.pctOfCap).toBeGreaterThan(0);
+    expect(partial.pctOfCap).toBeLessThan(100);
+  });
+
+  it('stays monotonic: more volatility never earns a bigger allocation', () => {
+    let previous = Number.POSITIVE_INFINITY;
+    for (const atrPct of [0.01, 0.03, 0.05, 0.08, 0.12, 0.15, 0.3, 0.49, 0.5, 1.0]) {
+      const s = sizePosition(sig({ atrPct, completeness: 1 }));
+      expect(s.fraction).toBeLessThanOrEqual(previous);
+      previous = s.fraction;
+    }
+    expect(previous).toBe(0);
+  });
+});

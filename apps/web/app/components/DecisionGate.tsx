@@ -63,11 +63,16 @@ export function DecisionGate({
         </div>
 
         <div className="min-w-0">
-          <div className="text-2xs uppercase tracking-[0.14em] text-text-muted">Sizing</div>
+          <div className="text-2xs uppercase tracking-[0.14em] text-text-muted">
+            Illustrative risk allocation
+          </div>
           <div className="tnum mt-0.5 truncate text-lg font-medium tracking-tight text-text-primary">
-            {sizing ? `${(sizing.fraction * 100).toFixed(3)}%` : '0.000%'}
-            <span className="ml-2 text-xs text-text-muted">
-              {sizing ? formatUsd(sizing.positionUsd) : 'no capital at risk'}
+            {sizing ? `${sizing.pctOfCap.toFixed(1)}%` : '0.0%'}
+            <span className="ml-1.5 text-xs text-text-muted">of cap</span>
+            <span className="ml-2 text-2xs text-text-muted/70">
+              {sizing
+                ? `≈ ${formatUsd(sizing.positionUsd)} · ${(sizing.fraction * 100).toFixed(3)}% bankroll`
+                : 'no capital at risk'}
             </span>
           </div>
         </div>
@@ -156,9 +161,19 @@ export function DecisionGate({
         </div>
         {sizing?.clampedBy === 'MAX_POSITION_PCT' ? (
           <p className="mt-1.5 text-2xs uppercase tracking-[0.1em] text-amber">
-            ▲ risk cap engaged — size clamped at MAX_POSITION_PCT
+            ▲ risk cap engaged — allocation clamped at MAX_POSITION_PCT
           </p>
         ) : null}
+        {sizing?.clampedBy === 'HYPER_VOLATILITY' ? (
+          <p className="mt-1.5 text-2xs uppercase tracking-[0.1em] text-rose">
+            ▲ hyper-volatility — ATR at or above 50% of price, allocation refused
+          </p>
+        ) : null}
+        <p className="mt-1.5 text-[9px] leading-relaxed text-text-muted/60">
+          Heuristic volatility-adjusted sizing cap, not a theoretical Kelly proof. Confidence
+          is derived from data quality — measured volatility and evidence completeness — not
+          from an estimated edge. Illustrative allocation, never a cash mandate.
+        </p>
       </div>
     </div>
   );

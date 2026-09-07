@@ -7,7 +7,7 @@ import {
   validateEnvelope,
 } from '../src/schema/tools.js';
 import { unwrapEnvelope } from '../src/mcp/interceptor.js';
-import { extractSignals } from '../src/arbiter/signals.js';
+import { extractSignals, probeEvidence } from '../src/arbiter/signals.js';
 
 const envelope = (over: Record<string, unknown> = {}) => ({
   schema_version: '1.0.0',
@@ -145,5 +145,40 @@ describe('MCP envelope unwrapping', () => {
     expect(() =>
       unwrapEnvelope('analyze_token', { content: [{ type: 'text', text: 'not json' }] }),
     ).toThrow(/MALFORMED_ENVELOPE/);
+  });
+});
+
+describe('boot-time evidence probe', () => {
+  it('reports the resolved paths when the payload is well shaped', () => {
+    const p = probeEvidence(validateEnvelope('analyze_token', envelope()));
+    expect(p.resolved).toBe(true);
+    expect(p.pricePath).toBe('market.price_usd');
+    expect(p.atrPath).toBe('technicals.atr_14');
+    expect(p.detail).toContain('resolved price at data.market.price_usd');
+  });
+
+  it('resolves through a differently nested shape, which is the point of searching', () => {
+    const p = probeEvidence(
+      validateEnvelope(
+        'analyze_token',
+        envelope({ data: { a: { b: { price_usd: 1 } }, c: [{ atr_14: { value: 2 } }] } }),
+      ),
+    );
+    expect(p.resolved).toBe(true);
+    expect(p.pricePath).toBe('a.b.price_usd');
+    expect(p.atrPath).toBe('c.0.atr_14.value');
+  });
+
+  it('reports unresolved paths loudly instead of failing silently', () => {
+    const p = probeEvidence(
+      validateEnvelope(
+        'analyze_token',
+        envelope({ data: { market: { mid: 10 }, technicals: { true_range_14: 1 } } }),
+      ),
+    );
+    expect(p.resolved).toBe(false);
+    expect(p.pricePath).toBeNull();
+    expect(p.atrPath).toBeNull();
+    expect(p.detail).toContain('could not resolve price and ATR(14)');
   });
 });

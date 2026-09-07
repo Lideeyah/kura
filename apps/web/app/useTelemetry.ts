@@ -3,6 +3,7 @@
 import { useEffect, useRef, useState } from 'react';
 import type {
   ArbiterVerdict,
+  BackoffEvent,
   ChaosState,
   LedgerRecord,
   TelemetryEvent,
@@ -21,6 +22,7 @@ export interface TelemetryState {
   records: LedgerRecord[];
   chaos: ChaosState[];
   errors: Array<{ code: string; message: string; at: string }>;
+  backoffs: BackoffEvent[];
 }
 
 const EMPTY: TelemetryState = {
@@ -32,6 +34,7 @@ const EMPTY: TelemetryState = {
   records: [],
   chaos: [],
   errors: [],
+  backoffs: [],
 };
 
 const MAX_VERDICTS = 25;
@@ -78,7 +81,7 @@ export function useTelemetry(): TelemetryState {
       setState((s) => reduce(s, event));
     };
 
-    for (const type of ['hello', 'tool_pulse', 'connection', 'verdict', 'ledger', 'chaos', 'error']) {
+    for (const type of ['hello', 'tool_pulse', 'connection', 'verdict', 'ledger', 'chaos', 'rate_limit', 'error']) {
       source.addEventListener(type, handle as EventListener);
     }
 
@@ -108,6 +111,8 @@ function reduce(s: TelemetryState, event: TelemetryEvent): TelemetryState {
         : { ...s, records: [event.record, ...s.records].slice(0, MAX_RECORDS) };
     case 'chaos':
       return { ...s, chaos: event.chaos };
+    case 'rate_limit':
+      return { ...s, backoffs: [event.backoff, ...s.backoffs].slice(0, 12) };
     case 'error':
       return {
         ...s,

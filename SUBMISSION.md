@@ -54,8 +54,9 @@ downstream to your agent, so the agent registers KURA instead of the research to
 cannot route around the gate.
 
 Every candidate passes four synchronous TypeScript invariants with **zero LLM calls**.
-Approved candidates get a bounded fractional Kelly position size; anything else is
-halted with the exact failing gate and the empirical value that tripped it. Either way
+Approved candidates get a bounded illustrative risk allocation, expressed as a
+percentage of a hard cap; anything else is halted with the exact failing gate and the
+empirical value that tripped it. Either way
 the decision is committed to a SHA-256 hash chain in WAL SQLite, and a standalone
 Python CLI recomputes that chain from raw disk state to prove nothing was altered.
 
@@ -74,7 +75,9 @@ probabilistic guessing is not.
    - `EVIDENCE` — price and ATR(14) both measurable; a null ATR is a veto, never a 0
 2. **Cryptographic flight recorder.** `H_n = SHA256(H_{n-1} : H_payload : timestamp :
    decision)`, genesis linked from 64 zeros, committed to WAL SQLite inside a single
-   IMMEDIATE transaction so no two blocks can claim the same parent.
+   IMMEDIATE transaction so no two blocks can claim the same parent. Scope stated
+   explicitly under Threat Model — it proves the trail is untampered, not that the data
+   is true.
 3. **Independent provenance verifier.** `skills/verify_provenance/tool.py` — standard
    library only, shares no code with the engine, recomputes every hash from stored raw
    payloads at ~0.06 ms/block. Required porting the ECMAScript `Number::toString`
@@ -87,7 +90,15 @@ probabilistic guessing is not.
    clients, and `npx kura gateway` over stdio for command-configured ones.
 6. **Live telemetry dashboard.** Server-Sent Events push tool latency, invariant state,
    and committed ledger rows into a Next.js terminal with a per-receipt audit drawer.
-7. **Empirical resilience benchmark.** 150 real trials across three fault classes, not
+7. **Rate-limit aware transport.** 429 and 503 retried with `Retry-After` honoured in
+   both delta-seconds and HTTP-date form, falling back to exponential backoff with
+   **full** jitter; 400 and 401 never retried, per the guide. Every backoff is reported
+   with attempt, delay, reason, status and quota headers — a retry is never an untracked
+   failure. Tested against a real local HTTP server that really returns 429.
+8. **Boot-time schema resolution probe.** Reports which measurement paths resolved, and
+   raises `SCHEMA RESOLUTION WARNING: ... falling back to strict veto mode` when RYO's
+   `data` shape moves — instead of silently vetoing every token with a green test suite.
+9. **Empirical resilience benchmark.** 150 real trials across three fault classes, not
    marketing copy.
 
 **Target Users**
@@ -99,6 +110,19 @@ decided — reviewers, auditors, or the builder's own post-mortem.
 **Scope**
 
 Research, evaluation, sizing recommendation, and cryptographic record-keeping.
+
+*Threat model — what KURA proves and does not prove.* KURA is agent black-box auditing
+and deterministic circuit breaking, not a decentralised oracle. It proves what the agent
+observed, when it observed it, that the invariants were evaluated before any downstream
+handoff, and that the trail was not altered afterwards. It does **not** prove that RYO's
+data is correct, that the recorded payload came from RYO (there is no response signature,
+so an operator who controls configuration could point the engine at a different MCP peer
+and mint a valid chain of fabricated observations), or that a downstream system obeyed
+the verdict. It defends against post-hoc tampering by anyone without the engine, silent
+upstream degradation, and faulty recollection. It does not defend against a malicious
+operator at configuration time, a compromised RYO endpoint, or a compromised host.
+Closing that gap needs response signing by RYO or external timestamp anchoring — neither
+is claimed here. Full section in README.md.
 
 Read-only by construction. RYO's surface cannot create or access a wallet, read
 balances or positions, or place, approve or execute a trade — and KURA adds no
@@ -112,10 +136,17 @@ wallet anywhere in the repository. Position sizes are research output, not instr
   the exact field names inside each tool's `data` block are unconfirmed. The signal
   extractor searches documented measurement names (`atr_14`, `price_usd`, and common
   variants) and **vetoes on `EVIDENCE` if it cannot find them** rather than guessing.
-  `GET /api/catalog` surfaces the authenticated catalog for pinning exact paths.
-- **Sizing is a model, not a prediction.** Fractional Kelly with confidence derived from
-  ATR(14)/price volatility and availability completeness. It is deterministic and
-  auditable; it is not a claim about future returns.
+  A boot-time probe reports which paths resolved and raises `SCHEMA RESOLUTION WARNING`
+  when they move, so drift surfaces as a loud startup error rather than as silent
+  universal refusal. `GET /api/catalog` surfaces the authenticated catalog for pinning
+  exact paths.
+- **Sizing is a heuristic cap, not a Kelly proof.** Real Kelly needs an estimated edge;
+  KURA has none — it has "the evidence was complete and the asset was not too volatile",
+  a statement about data quality, not expected return. The weights were chosen for sane
+  behaviour, not fitted to a backtest. The dashboard therefore leads with allocation as a
+  percentage of the hard risk cap rather than a dollar figure. It is deterministic,
+  monotonic and auditable; it is not a claim about future returns. At or above 50%
+  ATR/price it refuses to size at all rather than extrapolating past its own range.
 - **Single-process ledger.** WAL SQLite on one node. Correct and crash-safe for one
   engine; a multi-writer deployment would need a different design.
 - **Not financial advice**, and research output is not a guarantee of safety.
@@ -196,6 +227,10 @@ All documented in `.env.example`, which ships with an empty credential.
 |---|---|---|
 | `RYO_MCP_URL` | RYO-CHAN builder endpoint | `https://app-ryochan.com/api/mcp` |
 | `RYO_MCP_KEY` | Builder credential, sent as `Authorization: Bearer` | *(empty — you supply)* |
+| `RYO_RETRY_MAX_ATTEMPTS` | Attempts per request for 429/503/network errors | `4` |
+| `RYO_RETRY_BASE_DELAY_MS` | Full-jitter backoff base | `500` |
+| `KELLY_HYPER_VOL_ATR_PCT` | ATR/price at or above which sizing is refused | `0.5` |
+| `EVIDENCE_PROBE` | Boot-time measurement-path probe (1 tool call) | `1` |
 | `RYO_MCP_TRANSPORT` | `http` for live RYO-CHAN, `stdio` for the conformance peer | `stdio` |
 | `ENGINE_PORT` | Engine HTTP + SSE + MCP gateway port | `4000` |
 | `LEDGER_PATH` | SQLite flight recorder path | `./kura_flight_recorder.db` |
@@ -231,7 +266,7 @@ npx kura verify      # walk and verify the entire ledger hash chain
 **Test Command**
 
 ```bash
-npm test                                              # 82 tests, 7 files
+npm test                                              # 103 tests, 8 files
 npm run test:resilience                               # 50 real trials per fault class
 python3 skills/verify_provenance/tool.py --all        # independent chain verification
 python3 skills/verify_provenance/tool.py --all --quiet # summary and failures only
@@ -248,6 +283,7 @@ Coverage:
 | `test/provenance.test.ts` | The Python verifier reproducing TypeScript hashes across every number-formatting branch |
 | `test/e2e.test.ts` | Real MCP peer over real stdio: drop a tool → veto → SQLite commit → SSE delivery → cryptographic verification → recovery |
 | `test/gateway.test.ts` | A real MCP client over real HTTP proving an external agent cannot route around the gate |
+| `test/retry.test.ts` | 429 with a real `Retry-After`, 503 → full jitter, give-up behaviour, and the codes that must not be retried — against a real local HTTP server |
 
 Resilience benchmark, 50 real trials per fault class, 100% detection and recovery:
 

@@ -3,6 +3,7 @@ import cors from '@fastify/cors';
 import { StreamableHTTPServerTransport } from '@modelcontextprotocol/sdk/server/streamableHttp.js';
 import { config } from './config.js';
 import { buildGatewayServer } from './gateway/mcp-server.js';
+import { getQuota } from './mcp/client.js';
 import { bus, type TelemetryEvent } from './bus/telemetry.js';
 import { isToolName, TOOL_NAMES } from './schema/tools.js';
 import type { Supervisor } from './supervisor.js';
@@ -61,6 +62,8 @@ export function buildServer(sup: Supervisor) {
     ledger_count: sup.ledger.count(),
     invariants: config.invariants,
     mcp_endpoint: `http://localhost:${config.port}/mcp`,
+    evidence_probe: sup.evidenceProbe,
+    quota: getQuota(),
   }));
 
   app.get('/api/tools', async () => ({

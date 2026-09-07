@@ -2,7 +2,7 @@
 
 import { useCallback, useEffect, useMemo, useState } from 'react';
 import { useTelemetry } from './useTelemetry';
-import type { LedgerRecord, ToolName, VerificationResult } from './types';
+import type { EvidenceProbe, LedgerRecord, ToolName, VerificationResult } from './types';
 import { Dot, Panel } from './components/Panel';
 import { ToolRibbon } from './components/ToolRibbon';
 import { DecisionGate } from './components/DecisionGate';
@@ -19,8 +19,10 @@ interface Health {
   ledger_path: string;
   journal_mode: string;
   ledger_count: number;
-  invariants: { maxLatencyMs: number; minLiquidityUsd: number };
+  invariants: { maxLatencyMs: number; maxAsOfAgeMs: number };
   mcp_endpoint: string;
+  evidence_probe: EvidenceProbe | null;
+  quota: { limit: number | null; remaining: number | null; reset: number | null } | null;
 }
 
 export default function FlightTerminal() {
@@ -159,6 +161,28 @@ export default function FlightTerminal() {
           </div>
         </header>
 
+        {health?.evidence_probe && !health.evidence_probe.resolved ? (
+          <p
+            role="alert"
+            className="mb-3 rounded border border-amber/40 bg-amber/[0.07] px-3 py-2 text-xs text-amber"
+          >
+            <b>SCHEMA RESOLUTION WARNING</b> — expected measurement paths not resolved;
+            falling back to strict veto mode. {health.evidence_probe.detail}
+          </p>
+        ) : null}
+
+        {telemetry.backoffs.length > 0 ? (
+          <p className="mb-3 rounded border border-amber/30 bg-amber/[0.05] px-3 py-2 text-2xs text-amber">
+            <b>UPSTREAM BACKOFF</b> — {telemetry.backoffs.length} in this session · latest{' '}
+            {telemetry.backoffs[0]!.reason} after {telemetry.backoffs[0]!.delayMs}ms
+            {telemetry.backoffs[0]!.fromRetryAfter ? ' (server Retry-After)' : ' (full jitter)'}
+            {telemetry.backoffs[0]!.rateLimit?.remaining !== null &&
+            telemetry.backoffs[0]!.rateLimit !== null
+              ? ` · quota ${telemetry.backoffs[0]!.rateLimit!.remaining}/${telemetry.backoffs[0]!.rateLimit!.limit}`
+              : ''}
+          </p>
+        ) : null}
+
         {health?.connect_error ? (
           <p
             role="alert"
@@ -260,8 +284,11 @@ export default function FlightTerminal() {
         <footer className="mt-3 flex flex-wrap items-center justify-between gap-x-6 gap-y-1 text-[10px] text-text-muted/70">
           <span className="tnum truncate">{health?.ledger_path ?? '—'}</span>
           <span className="tnum">
-            latency ≤ {health?.invariants.maxLatencyMs ?? '—'}ms · liquidity ≥ $
-            {(health?.invariants.minLiquidityUsd ?? 0).toLocaleString('en-US')}
+            latency ≤ {health?.invariants.maxLatencyMs ?? '—'}ms · observation ≤{' '}
+            {((health?.invariants.maxAsOfAgeMs ?? 0) / 1000).toFixed(0)}s
+            {health?.evidence_probe?.resolved
+              ? ` · evidence: ${health.evidence_probe.atrPath}`
+              : ''}
           </span>
         </footer>
       </div>

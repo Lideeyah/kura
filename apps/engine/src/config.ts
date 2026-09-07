@@ -59,6 +59,15 @@ export const config = {
     key: process.env.RYO_MCP_KEY ?? process.env.RYO_MCP_TOKEN ?? '',
     /** Hard ceiling on a single tool call before the interceptor raises UPSTREAM_TIMEOUT. */
     requestTimeoutMs: num('RYO_REQUEST_TIMEOUT_MS', 10_000),
+    /**
+     * Per-request retry policy for 429 / 503 / network errors, with full jitter.
+     * The guide: "Use exponential backoff with jitter for 429, 503, and temporary
+     * network errors" and "Do not retry invalid arguments or unknown tools".
+     */
+    retryMaxAttempts: num('RYO_RETRY_MAX_ATTEMPTS', 4),
+    retryBaseDelayMs: num('RYO_RETRY_BASE_DELAY_MS', 500),
+    retryMaxDelayMs: num('RYO_RETRY_MAX_DELAY_MS', 20_000),
+
     /** Reconnect backoff after a transport-level failure. */
     reconnectBackoffMs: num('RYO_RECONNECT_BACKOFF_MS', 1_000),
     reconnectMaxBackoffMs: num('RYO_RECONNECT_MAX_BACKOFF_MS', 15_000),
@@ -85,6 +94,12 @@ export const config = {
     pMax: num('KELLY_P_MAX', 0.55),
     /** ATR/price at which the volatility score reaches zero. */
     maxAtrPct: num('KELLY_MAX_ATR_PCT', 0.15),
+    /**
+     * ATR/price at or above which the model refuses to size at all. Beyond the
+     * volatility score's floor the formula stops discriminating, so this is a hard
+     * refusal rather than an extrapolation into a range it cannot model.
+     */
+    hyperVolAtrPct: num('KELLY_HYPER_VOL_ATR_PCT', 0.5),
     maxPositionPct: num('KELLY_MAX_POSITION_PCT', 0.05),
   },
 
@@ -107,6 +122,8 @@ export const config = {
     autoEvaluate: num('AUTO_EVALUATE', 1),
     /** Fan the heartbeat across all six metered tools instead of the free /health. */
     pulseSweepTools: num('PULSE_SWEEP_TOOLS', 0),
+    /** Boot-time measurement-path probe. Costs one tool call; set 0 to skip. */
+    evidenceProbe: num('EVIDENCE_PROBE', 1),
   },
 
   /**

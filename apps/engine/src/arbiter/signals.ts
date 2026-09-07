@@ -30,28 +30,75 @@ const PRICE_KEYS = ['price_usd', 'price', 'current_price', 'usd_price', 'last_pr
 const ATR_KEYS = ['atr_14', 'atr14', 'atr', 'atr_value'];
 const RSI_KEYS = ['rsi_14', 'rsi14', 'rsi', 'rsi_value'];
 
+interface Found {
+  value: number;
+  /** Dotted path the measurement was resolved at, for the startup probe report. */
+  path: string;
+}
+
 /** Depth-first search for the first finite number stored under any of `keys`. */
-function findNumber(node: unknown, keys: string[], depth = 0): number | null {
+function find(node: unknown, keys: string[], trail = '', depth = 0): Found | null {
   if (depth > 6 || node === null || typeof node !== 'object') return null;
 
   if (!Array.isArray(node)) {
     const obj = node as Record<string, unknown>;
     for (const key of keys) {
       const v = obj[key];
-      if (typeof v === 'number' && Number.isFinite(v)) return v;
+      if (typeof v === 'number' && Number.isFinite(v)) {
+        return { value: v, path: trail ? `${trail}.${key}` : key };
+      }
       // Some measurements arrive wrapped, e.g. { atr_14: { value: 4.2 } }
       if (v && typeof v === 'object' && !Array.isArray(v)) {
         const inner = (v as Record<string, unknown>).value;
-        if (typeof inner === 'number' && Number.isFinite(inner)) return inner;
+        if (typeof inner === 'number' && Number.isFinite(inner)) {
+          return { value: inner, path: `${trail ? `${trail}.` : ''}${key}.value` };
+        }
       }
     }
   }
 
-  for (const child of Array.isArray(node) ? node : Object.values(node as object)) {
-    const found = findNumber(child, keys, depth + 1);
+  const entries: Array<[string, unknown]> = Array.isArray(node)
+    ? node.map((v, i) => [String(i), v])
+    : Object.entries(node as object);
+  for (const [k, child] of entries) {
+    const found = find(child, keys, trail ? `${trail}.${k}` : k, depth + 1);
     if (found !== null) return found;
   }
   return null;
+}
+
+const findNumber = (node: unknown, keys: string[]): number | null => find(node, keys)?.value ?? null;
+
+export interface EvidenceProbe {
+  resolved: boolean;
+  pricePath: string | null;
+  atrPath: string | null;
+  rsiPath: string | null;
+  detail: string;
+}
+
+/**
+ * Report which measurement paths resolve in a live payload.
+ *
+ * Without this, a change in RYO's `data` shape degrades into silence: `extractSignals`
+ * returns null, the EVIDENCE gate fails, and KURA vetoes every token forever while every
+ * test still passes. The engine should say so at boot instead.
+ */
+export function probeEvidence(envelope: RyoEnvelope): EvidenceProbe {
+  const price = find(envelope.data, PRICE_KEYS);
+  const atr = find(envelope.data, ATR_KEYS);
+  const rsi = find(envelope.data, RSI_KEYS);
+  const missing = [!price && 'price', !atr && 'ATR(14)'].filter(Boolean) as string[];
+  return {
+    resolved: price !== null && atr !== null,
+    pricePath: price?.path ?? null,
+    atrPath: atr?.path ?? null,
+    rsiPath: rsi?.path ?? null,
+    detail:
+      missing.length === 0
+        ? `resolved price at data.${price!.path}, ATR(14) at data.${atr!.path}`
+        : `could not resolve ${missing.join(' and ')} in data — searched ${[...PRICE_KEYS, ...ATR_KEYS].join(', ')}`,
+  };
 }
 
 export function extractSignals(

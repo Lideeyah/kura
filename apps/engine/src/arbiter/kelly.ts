@@ -17,13 +17,25 @@ export interface KellySizing {
     confidence: number;
     atrPct: number;
   };
-  clampedBy: 'NONE' | 'MAX_POSITION_PCT' | 'NON_POSITIVE_EDGE';
+  /** Allocation as a percentage of the hard risk cap — the headline figure. */
+  pctOfCap: number;
+  clampedBy: 'NONE' | 'MAX_POSITION_PCT' | 'NON_POSITIVE_EDGE' | 'HYPER_VOLATILITY';
 }
 
 const clamp01 = (n: number) => (n < 0 ? 0 : n > 1 ? 1 : n);
 
 /**
- * Fractional Kelly position sizing on real RYO measurements.
+ * Heuristic volatility-adjusted sizing cap. **Not a theoretical Kelly proof.**
+ *
+ * This is worth stating plainly, because the shape of the formula invites more credit
+ * than it deserves. Real Kelly requires an estimated edge. KURA has no edge estimate —
+ * it has "the evidence was complete and the asset was not too volatile", which is a
+ * statement about *data quality*, not about expected return. The weights below were
+ * chosen for sane behaviour, not fitted to any backtest.
+ *
+ * What it therefore is: a deterministic, monotonic, auditable ceiling that shrinks as
+ * volatility rises and as evidence thins, and collapses to zero at both extremes. Treat
+ * the output as an illustrative risk allocation, never as a cash mandate.
  *
  * No model call and no randomness. Confidence is a fixed weighting of two observable
  * quantities that RYO actually publishes:
@@ -43,13 +55,21 @@ const clamp01 = (n: number) => (n < 0 ? 0 : n > 1 ? 1 : n);
  * The MAX_POSITION_PCT clamp is a hard risk limit and reports itself in `clampedBy`,
  * so a saturated size is never mistaken for a computed one.
  *
+ * Above KELLY_HYPER_VOL_ATR_PCT the model refuses outright rather than extrapolating.
+ * The volatility score already floors at zero at KELLY_MAX_ATR_PCT, which means without
+ * this cutoff an asset with an ATR of 500% of its own price would size identically to
+ * one at 15% — the model going blind exactly where the risk is most extreme. An asset
+ * whose daily true range approaches its own price is not a position, it is a coin flip.
+ *
  * `completeness` may legitimately be null (a tool that declares no availability map).
  * That is treated as zero *confidence contribution*, not as full confidence — an
  * unmeasured section never argues for a bigger position.
  */
 export function sizePosition(signals: SizingSignals): KellySizing {
-  const { bankrollUsd, fraction: kellyFraction, payoffRatio: b, pMax, maxPositionPct, maxAtrPct } =
-    config.kelly;
+  const {
+    bankrollUsd, fraction: kellyFraction, payoffRatio: b, pMax,
+    maxPositionPct, maxAtrPct, hyperVolAtrPct,
+  } = config.kelly;
 
   const pMin = 1 / (1 + b);
   const volatilityScore = clamp01(1 - signals.atrPct / maxAtrPct);
@@ -67,7 +87,11 @@ export function sizePosition(signals: SizingSignals): KellySizing {
 
   let clampedBy: KellySizing['clampedBy'] = 'NONE';
   let fraction = kellyFraction * fullKelly;
-  if (fraction <= 0) {
+  if (signals.atrPct >= hyperVolAtrPct) {
+    // Hyper-volatile or illiquid: refuse rather than extrapolate past the model's range.
+    fraction = 0;
+    clampedBy = 'HYPER_VOLATILITY';
+  } else if (fraction <= 0) {
     fraction = 0;
     clampedBy = 'NON_POSITIVE_EDGE';
   } else if (fraction > maxPositionPct) {
@@ -81,6 +105,7 @@ export function sizePosition(signals: SizingSignals): KellySizing {
     b,
     fullKelly: round(fullKelly, 6),
     fraction: round(fraction, 6),
+    pctOfCap: round(maxPositionPct > 0 ? (fraction / maxPositionPct) * 100 : 0, 3),
     positionUsd: round(bankrollUsd * fraction, 2),
     bankrollUsd,
     inputs: {

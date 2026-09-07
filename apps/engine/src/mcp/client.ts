@@ -5,6 +5,7 @@ import { StdioClientTransport } from '@modelcontextprotocol/sdk/client/stdio.js'
 import type { Transport } from '@modelcontextprotocol/sdk/shared/transport.js';
 import { config, repoRoot } from '../config.js';
 import { EngineError } from './errors.js';
+import { createRetryingFetch, type RateLimitSnapshot } from './retry.js';
 
 export interface RyoTransportSpec {
   transport: 'http' | 'stdio';
@@ -35,6 +36,10 @@ export function transportSpecFromConfig(): RyoTransportSpec {
   return { transport: 'http', url: config.mcp.url, key: config.mcp.key };
 }
 
+/** Latest quota headers seen from the upstream, for /api/health and the dashboard. */
+let lastQuota: RateLimitSnapshot | null = null;
+export const getQuota = (): RateLimitSnapshot | null => lastQuota;
+
 function buildTransport(spec: RyoTransportSpec, mode: 'streamable' | 'sse'): Transport {
   if (spec.transport === 'stdio') {
     return new StdioClientTransport({
@@ -48,9 +53,21 @@ function buildTransport(spec: RyoTransportSpec, mode: 'streamable' | 'sse'): Tra
   const headers: Record<string, string> = {};
   if (spec.key) headers.Authorization = `Bearer ${spec.key}`;
   const url = new URL(spec.url!);
+  // Every HTTP request the SDK makes goes through the rate-limit aware fetch, so 429
+  // and Retry-After are honoured on tool calls, not just on the initial connect.
+  const retryingFetch = createRetryingFetch({
+    policy: {
+      maxAttempts: config.mcp.retryMaxAttempts,
+      baseDelayMs: config.mcp.retryBaseDelayMs,
+      maxDelayMs: config.mcp.retryMaxDelayMs,
+    },
+    onQuota: (q) => {
+      lastQuota = q;
+    },
+  });
   return mode === 'streamable'
-    ? new StreamableHTTPClientTransport(url, { requestInit: { headers } })
-    : new SSEClientTransport(url, { requestInit: { headers } });
+    ? new StreamableHTTPClientTransport(url, { requestInit: { headers }, fetch: retryingFetch })
+    : new SSEClientTransport(url, { requestInit: { headers }, fetch: retryingFetch });
 }
 
 /**
