@@ -225,9 +225,9 @@ columns do not jitter as the stream updates.
 ```
 fault              trials  detected  recovered  median     p95        min        max
 -----------------  ------  --------  ---------  ---------  ---------  ---------  ---------
-latency_spike      50      100%      100%       1.61 ms    2.4 ms     0.68 ms    3.13 ms
-malformed_payload  50      100%      100%       0.65 ms    1.68 ms    0.38 ms    5.62 ms
-peer_crash         50      100%      100%       519.76 ms  543.03 ms  503.07 ms  702.19 ms
+latency_spike      50      100%      100%       1.69 ms    2.9 ms     0.84 ms    3.24 ms
+malformed_payload  50      100%      100%       0.47 ms    0.93 ms    0.27 ms    3.26 ms
+peer_crash         50      100%      100%       519.42 ms  595.21 ms  509.25 ms  824.64 ms
 
 ledger chain after 300 blocks: INTACT
 ```
