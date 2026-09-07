@@ -49,20 +49,23 @@ Expected on screen:
 
 ```
 TARGET  SOL/USDC    VERDICT  APPROVED    SIZING ALLOCATION  100.000% of bankroll cap
-GATE TIME 57µs   ROUND TRIP 1.49ms   UPSTREAM STATUS ok   DATA MODE live
+GATE TIME <read it>   ROUND TRIP ~1-3ms   UPSTREAM STATUS ok   DATA MODE live
 ```
 
-> "Four gates, all green, in fifty-seven microseconds — with no language model anywhere
-> in that path. The allocation is a hundred percent of a hard risk cap, not a dollar
+> "Four gates, all green, in tens of microseconds — with no language model anywhere in
+> that path. The allocation is a hundred percent of a hard risk cap, not a dollar
 > mandate."
 
-⚠ **Read the gate time off the screen.** It varies 20–80 µs warm. Say "tens of
-microseconds" if you'd rather not chase a number.
+⚠ **Say "tens of microseconds", not a specific figure.** Measured across 12 consecutive
+runs: min 11 µs, median 29 µs, max 137 µs — and the *first* evaluation after the page
+loads can read a couple of hundred, because it pays cache and allocation costs the rest
+do not. Naming a number you then have to contradict on screen is the one thing worth
+avoiding here.
 
-**[0:24]** Click the **EVIDENCE FLOOR** row to expand it, then **scroll down far enough
-to show the whole JSON block and the sizing note under it** — at 1080p the payload runs
-below the fold. Hold it, then scroll straight back to the top so the candidate bar and
-Evaluate button are on screen for the next step.
+**[0:24]** Click the **EVIDENCE FLOOR** row to expand it, then **scroll down ~420px** to
+bring the whole JSON block and the heuristic-sizing note beneath it into view — at 1080p
+both sit below the fold. Hold about five seconds, then scroll straight back to the top so
+the candidate bar and the Evaluate button are on screen before the next step.
 
 > "Every gate shows the exact field it read. This one resolved price and ATR-14 out of
 > the live payload — and if it couldn't find them, it vetoes rather than substituting a
@@ -107,8 +110,8 @@ Expected in **Backoff activity** (right column):
 And in **Last verdict under fire**:
 
 ```
-SOL   VETO_HALT   breaker 156µs   FRESHNESS
-FRESHNESS breached: 2007.69 ms > 1200 ms (UPSTREAM_RATE_LIMITED)
+SOL   VETO_HALT   breaker <tens of µs>   FRESHNESS
+FRESHNESS breached: ~2007 ms > 1200 ms (UPSTREAM_RATE_LIMITED)
 ```
 
 **[1:02]**
@@ -120,18 +123,20 @@ FRESHNESS breached: 2007.69 ms > 1200 ms (UPSTREAM_RATE_LIMITED)
 **[1:08]** Fire **Mark the feed non-live → Inject**.
 
 ```
-SOL   VETO_HALT   breaker 76µs   PROVENANCE
+SOL   VETO_HALT   breaker <tens of µs>   PROVENANCE
 PROVENANCE rejected: data_mode="simulated" is not live
 ```
 
-⚠ **Your outline said "sub-50 µs" — the measured value is 76 µs**, and the warm range is
-20–80 µs. Say "under a hundred microseconds", or just read the screen. Don't claim sub-50
-over a display that reads 76.
+⚠ **Don't promise "sub-50 µs".** Observed values for this veto range from the low tens to
+around 140 µs. "Tens of microseconds" is true every time; a specific figure is not.
 
 > "Complete, fresh, and fake. RYO publishes the provenance of every measurement, and Kura
-> refuses to size capital against anything that isn't a live read. Seventy-six
-> microseconds — and the gate below it was never evaluated. There's no fallback branch to
-> take."
+> refuses to size capital against anything that isn't a live read. Tens of microseconds —
+> and the gate below it was never evaluated. There's no fallback branch to take."
+
+Note the line under the verdict: *data_mode is RYO's own provenance field. Kura did not
+generate this value — it read it, and refused to size capital against it.* If anyone
+watching wonders whether Kura is faking its own inputs, that sentence is the answer.
 
 **[1:20]** Click **Clear All Injected Faults**.
 
