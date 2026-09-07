@@ -1,205 +1,224 @@
-# KURA — 2–3 Minute Demo Script
+# Kura — Demo Shot List (target 2:00, single take)
 
-Shot list with the actual values the system produces. Every number below was measured,
-not estimated. Recorded against the local conformance peer, so it needs no credential
-and is fully reproducible by a judge.
+Every number below was measured against the running system, not estimated. Recorded
+against the local conformance peer, so it needs no credential and a judge can reproduce
+it exactly.
 
-## Before you hit record
+---
+
+## Pre-flight — do this before you hit record
 
 ```bash
 cd KURA
-lsof -ti:4000 | xargs -r kill        # clear a stale engine
-rm -f kura_flight_recorder.db*       # start from genesis so HEIGHT is small and legible
-npx kura start                       # terminal 1
-npm run dev:web                      # terminal 2 → http://localhost:3000
+lsof -ti:4000 | xargs -r kill          # clear a stale engine
+lsof -ti:3200 | xargs -r kill
+rm -f kura_flight_recorder.db*         # start from genesis
+
+# Autonomous loop OFF and a two-symbol watchlist, so the ledger contains ONLY the
+# evaluations you perform on camera. This is what makes Scene 3 land.
+AUTO_EVALUATE=0 KURA_WATCHLIST=SOL,AVAX npx kura start
+
+# second terminal
+npm run dev:web                        # http://localhost:3000
 ```
 
-Then **run one evaluation before recording** — click *Evaluate* once and discard it.
-The first gate evaluation on a cold process costs ~300 µs of V8 JIT warm-up; every
-one after is ~30 µs. If you record the very first call, the on-screen number will
-undersell the breaker by an order of magnitude.
+**Then run one throwaway evaluation and discard it.** The first gate call on a cold
+process pays ~300 µs of V8 JIT warm-up; every one after is 20–80 µs. Record the cold one
+and you undersell the breaker by 5×.
 
-Browser at 1440px wide. Collapse nothing — the integration drawer is scene 1.
+Browser window ~1440px wide. Console content caps at 1240px, so anything wider only adds
+margin.
+
+Keep a terminal one keystroke away. You won't need it, but if a judge asks "is that
+real?", `python3 skills/verify_provenance/tool.py --all --quiet` is the answer.
 
 ---
 
-## Scene 1 — The gateway and the nominal path (~45 s)
+## Scene 1 — Landing → the clean path  (0:00–0:40)
 
-**Show:** the terminal at the top of the dashboard.
+**Start on `/`.** Do not scroll. The headline is the framing.
 
-> "KURA is an MCP gateway. It speaks MCP client upstream to RYO-CHAN, and MCP server
-> downstream to your agent."
+> "Kura is a deterministic pre-trade execution firewall for autonomous agents. Pre-trade
+> invariant verification and a cryptographic audit trail, before capital is committed."
 
-Point at the **Integration** drawer — the three panels: `npx kura start`, the endpoint
-`http://localhost:4000/mcp`, and the `mcpServers` JSON block.
+**[0:08]** Click **Open Console** → `/app/evaluator`.
 
-> "Your agent registers this URL and calls `evaluate_candidate` instead of the research
-> tools directly. That means the gate sits between the agent and execution, and the
-> agent cannot route around it."
+**[0:12]** `SOL` is already in the candidate field. Click **Evaluate Candidate**.
 
-Point at the ribbon.
+Expected on screen:
 
-> "Six live tools — that's RYO's actual surface. Latency per tool, in tabular figures so
-> nothing jitters as the stream updates."
-
-Type `SOL` and click **Evaluate**.
-
-**Expect on screen:**
 ```
-TARGET   SOL/USDC   VERDICT  APPROVED   SIZING ALLOCATION  100.000% of bankroll cap
-✓ FRESHNESS          rtt 1.2 ms, as_of 12000 ms old
-✓ ORACLE INTEGRITY   ok
-✓ DATA PROVENANCE    live
-✓ EVIDENCE FLOOR     price $172.44, ATR 2.50%
-GATE ~20–50µs   STATUS ok   DATA MODE live
+TARGET  SOL/USDC    VERDICT  APPROVED    SIZING ALLOCATION  100.000% of bankroll cap
+GATE TIME 57µs   ROUND TRIP 1.49ms   UPSTREAM STATUS ok   DATA MODE live
 ```
 
-> "Four gates, all green, and a bounded position size — fractional Kelly, capped at 5%
-> of bankroll. The whole gate ran in tens of microseconds with no language model in the
-> path."
+> "Four gates, all green, in fifty-seven microseconds — with no language model anywhere
+> in that path. The allocation is a hundred percent of a hard risk cap, not a dollar
+> mandate."
 
-Read the number off the screen rather than memorising one — it varies run to run
-(measured 21–50 µs warm).
+⚠ **Read the gate time off the screen.** It varies 20–80 µs warm. Say "tens of
+microseconds" if you'd rather not chase a number.
 
-Point at the bottom row appearing in the **Flight Recorder**.
+**[0:24]** Click the **EVIDENCE FLOOR** row to expand it.
 
-> "And it's committed to a SHA-256 hash chain in SQLite before I finish this sentence."
+> "Every gate shows the exact field it read. This one resolved price and ATR-14 out of
+> the live payload — and if it couldn't find them, it vetoes rather than substituting a
+> zero."
 
-**Optional, if you have 5 seconds spare:** evaluate `AVAX` to show sizing actually
-varies. Measured: `APPROVED · 2.594% · $2,594 · ATR 11.29% · clamped NONE` — a smaller
-size than SOL because its volatility is higher and its intelligence coverage is partial.
-That kills the "the number is hardcoded" suspicion in one click.
+**[0:32]** Click the **AVAX** quick-pick, then **Evaluate Candidate**.
+
+```
+AVAX/USDC   APPROVED   51.882% of bankroll cap
+```
+
+> "Same four gates, half the allocation — because AVAX carries an eleven percent ATR
+> against SOL's two and a half. The sizing moves with measured volatility. Nothing here
+> is hardcoded."
+
+*This is the shot that kills the "the number is fake" suspicion. Don't skip it.*
 
 ---
 
-## Scene 2 — Adversarial injection and the circuit breaker (~45 s)
+## Scene 2 — Adversarial chaos and a real 429  (0:40–1:25)
 
-**Show:** the Adversarial Chaos Injector, right panel.
+**[0:40]** Click **Chaos Lab** in the nav.
 
-> "Now let's break it."
+> "Four injectors, each mapped to a real upstream failure mode."
 
-**Do the provenance failure first** — it leaves the connection intact, so there is no
-reconnect wait mid-scene. Click **SIMULATED data**.
+**[0:45]** Fire **Simulate Upstream Rate Limit → Inject**.
 
-**Expect on screen:**
+⚠ **This takes about two seconds of visible waiting — that is the point, not a stall.**
+Narrate straight through it:
+
+> "It's waiting out the server's Retry-After right now. This is the same retry wrapper
+> that goes around every live HTTP request — real 429, real Retry-After header, and full
+> jitter when the server doesn't send one."
+
+Expected in **Backoff activity** (right column):
+
 ```
-✓ FRESHNESS          ✓ ORACLE INTEGRITY  ok
-✕ DATA PROVENANCE    simulated
-— EVIDENCE FLOOR     SHORT-CIRCUITED
+429 · 1000ms   attempt 1/3 · server Retry-After
+429 · 1000ms   attempt 2/3 · server Retry-After
+```
+
+And in **Last verdict under fire**:
+
+```
+SOL   VETO_HALT   breaker 156µs   FRESHNESS
+FRESHNESS breached: 2007.69 ms > 1200 ms (UPSTREAM_RATE_LIMITED)
+```
+
+**[1:02]**
+
+> "Two seconds of retries genuinely blew the freshness budget, so it halted — and the
+> reason names the cause. It doesn't just say 'slow', it says rate-limited, so nobody
+> goes hunting for a network fault that isn't there."
+
+**[1:08]** Fire **Mock Synthetic Feed → Inject**.
+
+```
+SOL   VETO_HALT   breaker 76µs   PROVENANCE
 PROVENANCE rejected: data_mode="simulated" is not live
 ```
 
-> "RYO tells you the provenance of every measurement. This result is complete, it's
-> fresh, and it's fake. KURA refuses to size capital against anything that isn't a live
-> read. No amount of model reasoning catches that — it's a field you either check or
-> you don't."
+⚠ **Your outline said "sub-50 µs" — the measured value is 76 µs**, and the warm range is
+20–80 µs. Say "under a hundred microseconds", or just read the screen. Don't claim sub-50
+over a display that reads 76.
 
-Now the hard failure. Click **DROP analyze_token (503)**.
+> "Complete, fresh, and fake. RYO publishes the provenance of every measurement, and Kura
+> refuses to size capital against anything that isn't a live read. Seventy-six
+> microseconds — and the gate below it was never evaluated. There's no fallback branch to
+> take."
 
-Point at the ribbon: the `analyze_token` chip flips to rose with a `DROP` badge and
-status `DROPPED`.
-
-Click **Evaluate**.
-
-**Expect on screen:**
-```
-TARGET   SOL/USDC   VERDICT  VETO_HALT  SIZING ALLOCATION  0.000% capital protected
-✓ FRESHNESS          rtt 15.3 ms  →  then FAIL: no envelope (TRANSPORT_DROPPED)
-— ORACLE INTEGRITY   SHORT-CIRCUITED
-— DATA PROVENANCE    SHORT-CIRCUITED
-— EVIDENCE FLOOR     SHORT-CIRCUITED
-GATE ~15–40µs   TRIGGER ORACLE_DROP
-```
-
-> "Fifteen microseconds. The connection was severed, so the arbiter got a null envelope
-> and halted."
-
-Again, read the live number — measured 15–40 µs.
-
-Point at the three dimmed rows.
-
-> "This is the part that matters. Those three gates were never evaluated. An LLM agent
-> in this position reasons around the gap — it retries, or fills the hole with a
-> plausible number. KURA has no fallback branch to take. Capital allocation is zero."
-
-Click **RESET ALL FAULTS**.
-
-> "And it recovers on its own."
-
-⚠ **Wait for `MCP CONNECTED` to go green before clicking anything else.** A DROP severs
-the live transport for real, and the supervisor reconnects on a backoff — roughly a
-second. Click too fast and the next evaluation vetoes with `NOT_CONNECTED` instead of
-the gate you meant to show. Watch the header indicator, not the clock.
+**[1:20]** Click **Clear All Injected Faults**.
 
 ---
 
-## Scene 3 — Cryptographic audit, in the browser and the terminal (~40 s)
+## Scene 3 — Cryptographic verification  (1:25–1:55)
 
-Click **inspect** on the veto row in the Flight Recorder.
+**[1:25]** Click **Audit Ledger** in the nav.
 
-The drawer slides in from the right — no page reload, no layout shift behind it.
-
-> "Every decision is a block. Parent hash, payload hash, block hash — and the raw wire
-> payload those hashes actually cover."
-
-Click **Verify block cryptography**.
-
-**Expect:** `✓ CHAIN VALID — recomputed in 0.29ms`
-
-> "That's the engine recomputing its own work, which proves nothing on its own."
-
-**Cut to terminal.** Copy the command straight out of the drawer.
-
-```bash
-python3 skills/verify_provenance/tool.py --all --quiet
+```
+BLOCKS EVALUATED 5   VETOES ENFORCED 2   APPROVALS 3   CHAIN HEAD 0213096120a9cc33…
 ```
 
-**Expect:**
+> "Five blocks — exactly the five evaluations you just watched. Append-only, and each one
+> chained to the block before it."
+
+*The count is whatever is on your screen. With the pre-flight above it stays small and
+matches what the viewer just saw — which is the entire reason to turn the autonomous loop
+off.*
+
+**[1:34]** Click **Verify Hash Chain Integrity**.
+
 ```
-verify_provenance — /Users/.../kura_flight_recorder.db
-blocks checked: N
-
-CHAIN INTACT — N/N blocks verified in X ms (0.06 ms/block)
+CHAIN INTACT: 5/5 blocks verified (0 tampering detected)
 ```
 
-> "This is standard-library Python. It shares no code with the TypeScript that wrote
-> those hashes — it recomputes every one from raw disk state. Agreement between two
-> independent implementations is evidence, not a tautology."
+**[1:40]** Click any **VETO_HALT** row → the drawer slides in from the right.
 
-**The closer — tamper detection.** This is the strongest 10 seconds in the video:
+> "Parent digest, payload digest, block digest — and the raw payload those hashes actually
+> cover."
+
+Point at `✓ Block verified — recomputed in 0.288ms`.
+
+> "Recomputed live, in under a third of a millisecond. And that command at the bottom is a
+> standalone Python tool that shares no code with the engine — a judge can run it in their
+> own terminal against the same file."
+
+---
+
+## Closing  (1:55–2:00)
+
+> "Read-only by construction. No signing keys, no wallet, no execution path — and no model
+> guesses in the decision. Rule 6.05 compliant by design, not by policy."
+
+---
+
+## Optional 15s tail — only if the take runs short
 
 ```bash
 npm run demo
 ```
 
 Scroll to step 7:
+
 ```
 ── 7. a forged row is detected ──
    forged seq 3 (SOL) on disk
    → CHAIN BROKEN at seq 3: PAYLOAD_HASH_MISMATCH, BLOCK_HASH_MISMATCH
 ```
 
-> "Alter one historical record and the chain breaks at exactly that block, and names
-> which hash failed. That's the difference between a log and a ledger."
+> "Alter one historical record and the chain breaks at exactly that block, naming which
+> hash failed. That's the difference between a log and a ledger."
 
 ---
 
-## Closing line (~10 s)
+## Timing budget
 
-> "Four deterministic gates, no model in the decision path, and a decision history
-> anyone can verify from their own terminal in under a millisecond a block. Eighty-two
-> tests, and a hundred and fifty real fault-injection trials at a hundred percent
-> detection and recovery."
+| Scene | Window | Slack |
+|---|---|---|
+| 1 — Landing + clean path | 0:00–0:40 | comfortable |
+| 2 — Chaos + 429 | 0:40–1:25 | **tight** — the 429 eats ~2s of it |
+| 3 — Ledger + verification | 1:25–1:55 | comfortable |
+| Close | 1:55–2:00 | — |
+
+If you overrun, cut the **EVIDENCE FLOOR** row expansion first — it is the most expendable
+and the least surprising to a judge. Cut the **AVAX** evaluation last; it is doing the most
+persuasive work in the whole video.
 
 ---
 
-## Things to avoid saying
+## Things not to say
 
-- Don't say "honeypot detection" or "liquidity floor." Those gates were built against a
-  `check_safety` tool that RYO does not publish, and they were removed. Saying it would
-  be an easy thing for a judge to check and disprove.
-- Don't call the conformance peer a mock. It's a real MCP server over real stdio
-  publishing the real envelope. Say "local conformance peer" and, if asked, that the
-  engine has no offline mode and fails loudly when its configured peer is unreachable.
-- Don't claim a live-endpoint run unless you've done one by recording time.
-- Don't show `.env` on camera once your real key is in it.
+- **Don't say "honeypot detection" or "liquidity floor."** Those gates were built against
+  a `check_safety` tool RYO does not publish, and were removed. Trivially disprovable.
+- **Don't call the conformance peer a mock.** It is a real MCP server over real stdio
+  publishing the real envelope. Say "local conformance peer" — and if pressed, the engine
+  has no offline mode and fails loudly when its configured peer is unreachable.
+- **Don't say the ledger proves the data is true.** It proves what the agent observed and
+  that the record wasn't altered afterwards. There is no signature from RYO. That boundary
+  is written up in the README's Threat Model section, and saying it out loud reads as
+  maturity, not weakness.
+- **Don't claim a live-endpoint run** unless you have done one by recording time.
+- **Don't show `.env` on camera** once your real key is in it.

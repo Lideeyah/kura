@@ -169,7 +169,7 @@ wallet anywhere in the repository. Position sizes are research output, not instr
 | Field | Value |
 |---|---|
 | **Github Repository** | ⚠ Add the private repo URL once the invite from `@RYO Digital` lands |
-| **Demo Video** | ⚠ Add the link once recorded — see `DEMO_SCRIPT.md` in the repo |
+| **Demo Video** | ⚠ Add the link once recorded — 2:00 shot list in `DEMO_SCRIPT.md`, timed against the four console routes |
 | **Documentation** | `README.md` in the repository root — architecture, the four invariants, hash-chain construction, gateway tool reference, API surface, and the resilience benchmark |
 
 ---
