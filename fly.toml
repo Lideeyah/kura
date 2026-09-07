@@ -1,0 +1,38 @@
+# fly.toml — one command from a live URL:
+#   flyctl auth login && flyctl launch --copy-config --now
+app = "kura-console"
+primary_region = "lhr"
+
+[build]
+  dockerfile = "Dockerfile"
+
+[env]
+  PORT = "3000"
+  ENGINE_PORT = "4000"
+  ENGINE_ORIGIN = "http://127.0.0.1:4000"
+  LEDGER_PATH = "/data/kura_flight_recorder.db"
+  # Defaults to the local conformance peer, so the deploy works with no credential.
+  # Set RYO_MCP_KEY as a secret and flip these two to run against live RYO-CHAN:
+  #   flyctl secrets set RYO_MCP_KEY=... RYO_MCP_TRANSPORT=http
+  RYO_MCP_TRANSPORT = "stdio"
+  RYO_MCP_COMMAND = "npx"
+  RYO_MCP_ARGS = "tsx apps/engine/src/conformance/server.ts"
+  RYO_MCP_URL = "https://app-ryochan.com/api/mcp"
+  AUTO_EVALUATE = "0"
+  KURA_WATCHLIST = "SOL,AVAX"
+
+# The hash chain must outlive a redeploy.
+[[mounts]]
+  source = "kura_ledger"
+  destination = "/data"
+
+[http_service]
+  internal_port = 3000
+  force_https = true
+  auto_stop_machines = "suspend"
+  auto_start_machines = true
+  min_machines_running = 0
+
+[[vm]]
+  size = "shared-cpu-1x"
+  memory = "1gb"

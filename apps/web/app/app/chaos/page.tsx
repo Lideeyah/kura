@@ -98,6 +98,7 @@ export default function ChaosPage() {
                       disabled={busy}
                       onClick={() => void inject(inj.action, (inj as { delayMs?: number }).delayMs)}
                       className="shrink-0"
+                      testId={`inject-${inj.action}`}
                     >
                       {running === inj.action ? (
                         <span className="flex items-center gap-2">

@@ -41,6 +41,7 @@ export function Button({
   tone = 'default',
   className = '',
   type = 'button',
+  testId,
 }: {
   children: ReactNode;
   onClick?: () => void;
@@ -48,6 +49,8 @@ export function Button({
   tone?: 'default' | 'primary' | 'veto';
   className?: string;
   type?: 'button' | 'submit';
+  /** Stable hook for automation — injector labels change to "Re-fire" once active. */
+  testId?: string;
 }) {
   const tones = {
     default: 'border-border bg-surface-2 text-text-primary hover:border-border-strong',
@@ -57,6 +60,7 @@ export function Button({
   return (
     <button
       type={type}
+      data-testid={testId}
       onClick={onClick}
       disabled={disabled}
       className={`rounded border px-3 py-1.5 text-2xs tracking-tight transition-colors disabled:cursor-not-allowed disabled:opacity-40 ${tones[tone]} ${className}`}

@@ -491,6 +491,30 @@ skills/verify_provenance/      standalone Python verifier
 
 ---
 
+## Deploying
+
+KURA is **one process, not a serverless function**. The engine holds a WAL SQLite hash
+chain on disk, a long-lived stdio child process for the MCP peer, and in-memory chaos
+state — none of which survive a serverless function boundary, and a ledger on an
+ephemeral per-instance filesystem would silently restart from genesis. So it wants a
+host that runs containers with a persistent volume.
+
+```bash
+flyctl auth login
+flyctl launch --copy-config --now      # uses the committed fly.toml + Dockerfile
+```
+
+The volume mounted at `/data` is what keeps the chain intact across redeploys. The
+deploy runs against the local conformance peer with no credential; to point it at
+production:
+
+```bash
+flyctl secrets set RYO_MCP_KEY=... RYO_MCP_TRANSPORT=http
+```
+
+Vercel can host `apps/web` on its own, but the console would have no engine to talk to —
+it would render with `Upstream down` and no evaluations. Deploy the container instead.
+
 ## Notes on the frontend
 
 The dashboard is a pure consumer of the engine's public API. It holds no business
