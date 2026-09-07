@@ -9,6 +9,7 @@ fails. That is the point.
 
     python3 skills/verify_provenance/tool.py --receipt <RECEIPT_ID>
     python3 skills/verify_provenance/tool.py --all
+    python3 skills/verify_provenance/tool.py --all --quiet
     python3 skills/verify_provenance/tool.py --all --json
 
 Exit codes:  0 = every checked block verified,  1 = a break was found,  2 = bad usage.
@@ -211,6 +212,12 @@ def main() -> int:
     parser.add_argument("--all", action="store_true", help="walk and verify the entire chain")
     parser.add_argument("--db", default=os.environ.get("LEDGER_PATH", DEFAULT_DB))
     parser.add_argument("--json", action="store_true", dest="as_json", help="machine-readable output")
+    parser.add_argument(
+        "--quiet",
+        "-q",
+        action="store_true",
+        help="print only the summary and any failures, not every verified block",
+    )
     args = parser.parse_args()
 
     if not args.receipt and not args.all:
@@ -260,7 +267,11 @@ def main() -> int:
 
     print(f"verify_provenance — {os.path.abspath(args.db)}")
     print(f"blocks checked: {len(results)}")
+    # A long chain scrolls the summary off screen, so --quiet keeps failures (the part
+    # that actually needs reading) and drops the per-block PASS lines.
     for r in results:
+        if args.quiet and r["valid"]:
+            continue
         print(fmt(r))
     per = elapsed_ms / max(len(results), 1)
     print(

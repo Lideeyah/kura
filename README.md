@@ -80,8 +80,9 @@ with the TypeScript that wrote them, so agreement is evidence rather than tautol
 
 ```bash
 python3 skills/verify_provenance/tool.py --all
+python3 skills/verify_provenance/tool.py --all --quiet    # summary and failures only
 python3 skills/verify_provenance/tool.py --receipt <RECEIPT_ID>
-python3 skills/verify_provenance/tool.py --all --json    # machine-readable
+python3 skills/verify_provenance/tool.py --all --json     # machine-readable
 ```
 
 Exit code 0 means the chain is intact; 1 means a break was found and named.
@@ -126,17 +127,23 @@ MCP client over real HTTP, including that a dropped upstream oracle still vetoes
 npm install
 cp .env.example .env
 npx kura start          # engine: REST + SSE + MCP gateway on :4000
+npm run dev:web         # dashboard on :3000
 ```
 
-`npx kura verify` walks the whole ledger chain. `npx kura --help` lists both.
+That runs with no credentials. `.env.example` points at the local conformance peer — a
+real MCP server over real stdio, described below — so a fresh clone is live immediately
+and the dashboard header names whichever peer you are actually talking to. Point it at
+production by swapping the commented block in `.env`.
+
+`npx kura verify` walks the whole chain; `npx kura --help` lists both commands.
 
 ### Against the live RYO-CHAN endpoint
 
-Set these in `.env`:
+Comment out the three `stdio` lines in `.env` and set:
 
 ```
 RYO_MCP_TRANSPORT=http
-RYO_MCP_URL=https://your-ryo-chan-endpoint/mcp
+RYO_MCP_URL=https://api.ryobuild.com/mcp
 RYO_MCP_TOKEN=your-token
 ```
 
