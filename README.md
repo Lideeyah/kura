@@ -1,22 +1,277 @@
-# KURA — Flight Recorder
+# KURA (倉)
 
-A deterministic execution gate and tamper-evident decision ledger for the RYO-CHAN MCP
-toolset.
+> **Deterministic Pre-Trade Execution Firewall & Cryptographic Black-Box Audit Engine for Autonomous Market Agents.**
+> Built for the **RYO-CHAN Virtual Hackathon** — *Track 01: Autonomous Agents*.
 
-KURA is an MCP **gateway**: it speaks MCP *client* upstream to RYO-CHAN and MCP
-*server* downstream to your agent. Your agent registers KURA instead of the market
-tools, so the gate sits between intent and execution and cannot be routed around. Every candidate
-trade passes four synchronous invariants; the ones that survive get a fractional Kelly
-position size, the ones that don't get an explicit, auditable veto. Either way the
-decision is committed to a SHA-256 hash chain in SQLite, and anyone can recompute that
-chain from the raw wire payloads with a script that shares no code with the engine.
-
-**Status: the engine, the API, the ledger and the dashboard work end-to-end over real
-transport, and the terminal now carries its full visual identity.**
+**Demo:** [youtu.be/1MMqfDH9mUA](https://youtu.be/1MMqfDH9mUA) — a narrated 73-second walkthrough of the
+evaluator, the chaos lab under a real HTTP 429, and the audit ledger verifying its own chain.
+`kura-demo-walkthrough.mp4` in this repository is the same footage as an offline mirror, **without
+the voiceover** — watch the YouTube cut first.
 
 ---
 
-**Demo:** https://youtu.be/1MMqfDH9mUA — a 1m13s walkthrough of the evaluator, the chaos lab under a real 429, and the audit ledger verifying its own chain.
+### The Executive Problem
+
+Autonomous agents fail silently before they fail loudly.
+
+When downstream LLM-driven execution loops consume market intelligence tools directly, they operate
+under an implicit, fatal premise: **that external signals are fresh, authentic, calibrated, and
+live.**
+
+In production systems, market feeds degrade intermittently:
+
+* Upstream providers return HTTP 200 payloads wrapped in synthetic error bodies (`isError: true`).
+* RPC endpoints saturate, triggering unhandled rate limiting and silent cascade stalls.
+* Feed degraded states drop into `data_mode="simulated"` without warning.
+* Autonomous agents hallucinate position sizing, treating high-volatility spikes identically to
+  stable trends.
+
+**Kura is the air-gap.** Sitting as a Model Context Protocol (MCP) gateway directly between external
+intelligence feeds and downstream execution environments, Kura subjects every payload to
+deterministic mathematical verification before capital can be touched.
+
+Zero private keys. Zero transaction signing. Strictly compliant with **Rule 6.05**.
+
+---
+
+### Core Architecture & Invariant Gates
+
+```
+                  [ RYO-CHAN MCP / Market Tools ]
+                                 │
+                                 ▼
+                ┌─────────────────────────────────┐
+                │       KURA PROXY GATEWAY        │
+                │   (Stateless HTTP / JSON-RPC)   │
+                └────────────────┬────────────────┘
+                                 │
+             ┌───────────────────┴───────────────────┐
+             ▼                                       ▼
+┌───────────────────────────┐           ┌──────────────────────────┐
+│     RESILIENCE ENGINE     │           │   DETERMINISTIC GATES    │
+│ ───────────────────────── │           │ ──────────────────────── │
+│ • Pacing & Burst Throttler│           │ 1. FRESHNESS (Latency)   │
+│ • Exponential Backoff     │   ───►    │ 2. ORACLE (status: ok)   │
+│ • Full Jitter Scheduling  │           │ 3. PROVENANCE (Live/Sim) │
+│ • Retry-After Parser      │           │ 4. EVIDENCE (ATR Floor)  │
+└───────────────────────────┘           └────────────┬─────────────┘
+                                                     │
+                                                     ▼
+                                        ┌──────────────────────────┐
+                                        │    MATHEMATICAL SIZING   │
+                                        │ ──────────────────────── │
+                                        │ Volatility-adjusted cap  │
+                                        │ based on parsed ATR-14   │
+                                        └────────────┬─────────────┘
+                                                     │
+                                                     ▼
+                                        ┌──────────────────────────┐
+                                        │    SHA-256 HASH CHAIN    │
+                                        │ ──────────────────────── │
+                                        │ Append-only SQLite WAL   │
+                                        │ Block Receipts & Proofs  │
+                                        └──────────────────────────┘
+```
+
+#### 1. Pre-flight validation and the invariant circuit breakers
+
+* **`Envelope Validation`** — Pre-arbiter schema validation via `validateEnvelope`. Drops malformed
+  dictionaries, missing metadata, or absent fields instantly with
+  `SCHEMA_MISMATCH_OR_MISSING_FIELD`, before any gate runs.
+* **`FRESHNESS`** — Rejects stale or queued messages. Round-trip telemetry and timestamp
+  differentials are clamped against strict latency bounds (`INV_MAX_LATENCY_MS`). Self-imposed
+  client pacing delays are decoupled, so internal rate-throttling never poisons upstream freshness
+  measurements.
+* **`ORACLE`** — Verifies operational feed integrity by validating upstream tool execution status
+  (`status === 'ok'`). `partial` and `unavailable` are refusals, not degradations.
+* **`PROVENANCE`** — Evaluates `data_mode`. If upstream feeds flip to `simulated` or a degraded
+  fallback state, Kura trips an instantaneous circuit break. Non-live data is forbidden from
+  influencing capital.
+* **`EVIDENCE`** — Enforces verifiable technical indicators. Tokens missing authentic market pricing
+  or volatility metrics (`atr_14_pct` or an absolute ATR) fail fast rather than being sized on a
+  substituted zero.
+
+#### 2. Deterministic risk and dynamic volatility sizing
+
+Rather than allowing an LLM agent to hallucinate arbitrary trade sizing, Kura computes risk-adjusted
+boundaries mathematically:
+
+```
+Allocation Cap = f(ATR₁₄)
+```
+
+* Tokens exhibiting low volatility (e.g. SOL at 2.50% ATR) receive full operational allocation
+  (100.000% of cap).
+* Tokens exhibiting elevated volatility (e.g. AVAX at 11.29% ATR) scale down dynamically
+  (51.882% of cap).
+* Hyper-volatile assets (≥ 50% ATR) are clamped to 0% execution allowance.
+
+This is a heuristic volatility-adjusted cap, not a theoretical Kelly proof — see
+[Position sizing](#position-sizing-detail) below for what the model does and does not claim.
+
+#### 3. Cryptographic black-box audit trail
+
+Every evaluation — whether `APPROVED` or `VETO_HALT` — is committed to an append-only, SQLite
+WAL-mode hash chain.
+
+Crucially, **the verdict itself is sealed within the hash**, so the decision cannot be altered
+independently of the evidence that produced it:
+
+```
+Hₙ = SHA-256( Hₙ₋₁ : payloadHashₙ : timestampₙ : decisionₙ )
+```
+
+Genesis links from 64 zeros. Ships with an independent Python 3 verifier
+(`skills/verify_provenance/tool.py`) that recomputes every digest from raw disk state outside the
+Node.js runtime.
+
+---
+
+### Regulatory Alignment & Governance: The BLI Standard
+
+As autonomous AI agents take on economic agency, they face emerging regulatory scrutiny around
+algorithmic liability, market manipulation, and consumer protection.
+
+In alignment with principles championed by hackathon partner the **Blockchain Legal Institute
+(BLI)**, KURA moves autonomous agent systems from "black-box risk" toward verifiable institutional
+governance:
+
+* **Non-Custodial Compliance (Rule 6.05).** Strictly isolates intelligence from custody. KURA never
+  handles, stores, or requests private keys. It issues gate receipts (`APPROVED` / `VETO_HALT`),
+  leaving execution custody strictly segregated.
+* **Forensic Non-Repudiation.** Post-trade disputes in automated trading usually stall because
+  application logs can be altered or truncated. KURA seals every decision into an append-only,
+  SHA-256 hash-chained SQLite WAL ledger that an external auditor can verify independently. The
+  precise boundary of that guarantee — what it proves and what it does not — is stated in
+  [Threat model and trust assumptions](#threat-model-and-trust-assumptions).
+* **Consumer & Capital Protection.** Prevents algorithmic failure cascades by enforcing mathematical
+  invariant gates, rejecting degraded `simulated` data modes, uncalibrated pricing anomalies, and
+  stale feeds.
+
+---
+
+### Resilience: Hardened for Real-World Upstream Conditions
+
+Every row below is a failure mode found by running against the live RYO-CHAN endpoint, not one
+anticipated in design:
+
+| Production failure mode | Unmitigated agent behavior | Kura invariant protection |
+| :--- | :--- | :--- |
+| **HTTP 200 with `isError: true`** | Agent parses partial payload; proceeds on bad data | Trapped at the protocol envelope; text pattern-matched before assigning `UPSTREAM_RATE_LIMITED`, otherwise `TOOL_ERROR` |
+| **Silent burst saturation** | Upstream refuses queries despite unspent per-minute quota | Outbound rate-pacer enforces minimum call spacing, excluded from measured latency |
+| **Stateless stream disconnects** | Standard MCP clients report fatal `NOT_CONNECTED` | Self-healing connection manager treats HTTP stream resets as ordinary stateless cycles |
+| **Percentage-scale inversion** | Raw ATR percentages (e.g. `4.23`) misparsed as absolute values | Dual-path signal extractor converts percentage and absolute forms separately |
+
+---
+
+### Benchmark Verification
+
+Audited against 128 automated tests across 9 test suites and live network telemetry:
+
+```
+── Invariant gate execution latency ──────────────────────────────────
+   Min gate evaluation            11 µs
+   Median gate evaluation         29 µs
+   Typical warm execution         15 – 160 µs   (full engine pipeline)
+   Cold-start gate evaluation    210 – 500 µs
+
+── Cryptographic audit ledger ────────────────────────────────────────
+   Storage                        SQLite WAL-mode append-only hash chain
+   Block digest recomputation     0.06 – 0.70 ms per block (typical 0.25 ms)
+   Tamper detection               Dual-language: TypeScript engine + Python CLI
+```
+
+Fault-injection recovery, 50 real trials per class, 100% detection and recovery:
+
+| Fault | Median | p95 |
+| :--- | ---: | ---: |
+| Latency spike | 1.69 ms | 2.9 ms |
+| Malformed payload | 0.47 ms | 0.93 ms |
+| Peer crash (real process respawn) | 519.42 ms | 595.21 ms |
+
+Reproduce with `npm run test:resilience`. Recovery is wall-clock from the fault clearing to a
+healthy `APPROVED` block committing again.
+
+---
+
+### Operational Console
+
+Four dedicated routes at `http://localhost:3200`:
+
+* **`/app/evaluator`** — Live evaluation feed showing microsecond gate timings, dynamic sizing
+  percentages as numeric readouts, and raw payload telemetry per gate.
+* **`/app/chaos`** — Adversarial lab for on-the-fly injection of HTTP 429 rate limits, synthetic
+  degradation modes, oracle degradation, and artificial latency stalls.
+* **`/app/ledger`** — Tamper-evident block explorer with sub-millisecond chain verification and
+  single-block audit drawers.
+* **`/app/integration`** — Gateway reference for connecting external autonomous agents to the Kura
+  firewall.
+
+---
+
+### Quickstart & Verification
+
+Kura operates out of the box against an authentic zero-credential 6-tool JSON-RPC conformance peer.
+Reviewers need no API keys to verify the entire system.
+
+**Prerequisites** — Node.js v20.0.0+, npm v9.0.0+, Python v3.9+ (optional, for the independent
+audit verifier).
+
+```bash
+git clone https://github.com/RYO-Digital/ryochan-hackathon_repository-249.git
+cd ryochan-hackathon_repository-249
+
+npm install
+cp .env.example .env
+
+# Engine on :4000, console on :3200
+npm run dev
+```
+
+```bash
+# 128 unit, integration and invariant regression tests across 9 suites
+npm test
+```
+
+```bash
+# Independent cryptographic audit of the SQLite chain, outside the Node.js runtime
+python3 skills/verify_provenance/tool.py --all
+```
+
+---
+
+### Repository Structure
+
+```
+├── apps/
+│   ├── engine/
+│   │   └── src/
+│   │       ├── arbiter/          # Invariant gates + signals.ts (ATR/price extraction)
+│   │       ├── ledger/           # Append-only SHA-256 SQLite hash-chain engine
+│   │       ├── mcp/              # Client, interceptor, retry, pacer
+│   │       ├── gateway/          # KURA's own MCP server surface
+│   │       ├── schema/           # Envelope contract and runtime validation
+│   │       └── conformance/      # Zero-credential 6-tool JSON-RPC peer
+│   └── web/                      # Operations console (:3200)
+├── skills/
+│   └── verify_provenance/        # Standalone Python 3 cryptographic ledger verifier
+├── DEMO_SCRIPT.md                # Narration mapped to video timestamps
+├── SUBMISSION.md                 # Official hackathon submission overview
+├── RYOCHAN-Hackthon-Project-Submission-Form.pdf
+└── kura-demo-walkthrough.mp4     # 73s walkthrough, offline mirror of the YouTube cut
+```
+
+---
+
+### Hackathon Compliance (Rule 6.05)
+
+* **No private key custody.** Kura never requests, stores, or handles private keys.
+* **Read-only architecture.** Operates exclusively under `tools:read` scope to evaluate market
+  intelligence before trade execution.
+* **Zero direct order routing.** Issues verdict receipts (`APPROVED` / `VETO_HALT`); downstream
+  agents retain sole responsibility for executing orders on verified parameters.
+
+---
 
 ## Threat model and trust assumptions
 
@@ -66,89 +321,6 @@ claimed here.
 
 ---
 
-## The thesis, in three claims
-
-### 1. The gate is algorithmic, not probabilistic
-
-When the upstream call drops or latency crosses 1,200 ms, KURA does not ask a language
-model what to do. It does not retry with a softer prompt, fall back to a cached answer,
-or substitute a default. A synchronous TypeScript function reads the empirical values,
-fails the first invariant that breaks, and returns.
-
-```
-   probabilistic agent                    KURA's arbiter
-   ───────────────────                    ──────────────
-   tool fails                             tool fails
-   → prompt the model with the error      → the arbiter receives safety: null
-   → model reasons about it               → ORACLE gate fails on a boolean check
-   → model may retry, may guess,          → downstream gates are NOT_EVALUATED
-     may hallucinate a safe-looking       → VETOED, with the empirical value recorded
-     rationale
-   → 800–3000 ms, non-reproducible        → 20–300 µs, byte-identical every run
-```
-
-`evaluate()` in [`apps/engine/src/arbiter/invariants.ts`](apps/engine/src/arbiter/invariants.ts)
-is not `async`. It has no `await` in it, imports no client, and touches no network. It
-*cannot* hang on a degraded upstream, because there is nothing in it to hang on. The
-test suite asserts this structurally, not rhetorically: 1,000 hostile-condition vetoes
-must average under 1 ms, and the returned value must not be a promise.
-
-The four gates, evaluated in order and short-circuiting on the first failure:
-
-| # | Invariant | Predicate | Refuses |
-|---|-----------|-----------|---------|
-| 1 | `FRESHNESS`  | `latencyMs <= 1200 && asOfAgeMs <= 300_000` | slow round-trips and stale observations |
-| 2 | `ORACLE`     | `status === 'ok'` | `partial` and `unavailable` results |
-| 3 | `PROVENANCE` | `data_mode === 'live'` | `simulated`, `mixed`, `unknown` measurement |
-| 4 | `EVIDENCE`   | price and ATR(14) both measurable | sizing on a measurement that isn't there |
-
-All four read the **public builder envelope** RYO publishes and guarantees, rather than
-inferred internals a catalog change could silently invalidate. `PROVENANCE` is the one
-worth pausing on: KURA will not size capital against anything that is not a live read,
-which is exactly the failure the guide warns about and one no amount of model reasoning
-would catch.
-
-Every gate reports the value it actually saw, so a veto is fully reconstructable from
-the ledger alone months later.
-
-### 2. Decisions are cryptographically chained, not logged
-
-Each committed decision is a block:
-
-```
-payloadHash = SHA256( canonicalJson(rawWirePayload) )
-blockHash   = SHA256( prevBlockHash : payloadHash : timestamp : decision )
-```
-
-Genesis links from 64 zeros. Altering any historical row — a liquidity figure, a
-timestamp, a decision — changes that block's hash and severs its link to its successor.
-The break is localised: the verifier names the exact sequence number and which of
-`PAYLOAD_HASH_MISMATCH` / `BLOCK_HASH_MISMATCH` / `PARENT_LINK_BROKEN` fired.
-
-SQLite runs in WAL mode with `synchronous = FULL`. The head read and the insert share
-one `IMMEDIATE` transaction, so two blocks can never claim the same parent.
-
-### 3. Verification is executable by a third party
-
-`skills/verify_provenance/tool.py` is standard-library Python. It opens the database
-read-only and recomputes every hash from the stored raw payloads. It shares no code
-with the TypeScript that wrote them, so agreement is evidence rather than tautology.
-
-```bash
-python3 skills/verify_provenance/tool.py --all
-python3 skills/verify_provenance/tool.py --all --quiet    # summary and failures only
-python3 skills/verify_provenance/tool.py --receipt <RECEIPT_ID>
-python3 skills/verify_provenance/tool.py --all --json     # machine-readable
-```
-
-Exit code 0 means the chain is intact; 1 means a break was found and named.
-
-> Getting this right required porting the ECMAScript `Number::toString` algorithm to
-> Python. `JSON.stringify(0.0000221)` is `"0.0000221"` but Python's `repr` gives
-> `'2.21e-05'` — hashing the Python form would have raised a false tamper alarm on any
-> small number. The test suite pins this with fixtures that straddle every branch of
-> the algorithm.
-
 ---
 
 ## Connect an agent
@@ -177,163 +349,7 @@ no fallback estimate — the tool returns `sizing: null` and the agent has nothi
 on. [`test/gateway.test.ts`](apps/engine/test/gateway.test.ts) proves this with a real
 MCP client over real HTTP, including that a dropped upstream oracle still vetoes.
 
-## Run it
-
-```bash
-npm install
-cp .env.example .env
-npx kura start          # engine: REST + SSE + MCP gateway on :4000
-npm run dev:web         # dashboard on :3000
-```
-
-That runs with no credentials. `.env.example` points at the local conformance peer — a
-real MCP server over real stdio, described below — so a fresh clone is live immediately
-and the dashboard header names whichever peer you are actually talking to. Point it at
-production by swapping the commented block in `.env`.
-
-`npx kura verify` walks the whole chain; `npx kura --help` lists both commands.
-
-### Against the live RYO-CHAN endpoint
-
-Comment out the three `stdio` lines in `.env` and set:
-
-```
-RYO_MCP_TRANSPORT=http
-RYO_MCP_URL=https://app-ryochan.com/api/mcp
-RYO_MCP_KEY=your-builder-key
-```
-
-`.env` is gitignored; `.env.example` ships with an empty key. Never commit a populated
-credential. The heartbeat polls the unauthenticated `/health` endpoint, which spends no
-tool-call quota — the guide warns against tight polling loops over the metered tools, so
-per-tool latency is sampled from real evaluations instead. `PULSE_SWEEP_TOOLS=1` opts
-into a full six-tool sweep for local work.
-
-The HTTP transport tries Streamable HTTP first and falls back to SSE. `RYO_MCP_TOKEN`
-is sent as `Authorization: Bearer …`. There is **no offline mode**: if the peer is
-unreachable the engine says so and retries with backoff — it never fabricates a payload.
-
-For a local stdio peer instead:
-
-```
-RYO_MCP_TRANSPORT=stdio
-RYO_MCP_COMMAND=npx
-RYO_MCP_ARGS=tsx apps/engine/src/conformance/server.ts
-```
-
-### One command that proves the whole thesis
-
-```bash
-npm run demo
-```
-
-Approves a clean token with a sized position, refuses simulated data, drops
-`analyze_token` and watches the breaker trip in microseconds, trips the latency ceiling,
-recovers, verifies the chain, then forges a row on disk and detects it. Every line is
-executed.
-
-### The dashboard
-
-```bash
-npm run dev
-```
-
-Engine on `:4000`, dashboard on `:3000` (Next proxies `/api/*` through, so SSE is
-same-origin).
-
-The console is four routes behind a persistent shell, each answering one question:
-
-| Route | Question it answers |
-|---|---|
-| `/` | What is this? Static landing page — headline, three pillars, one CTA. |
-| `/app/evaluator` | Would this candidate pass? Symbol in, verdict out, with a four-gate matrix whose rows expand to show the exact JSON field that decided each one. |
-| `/app/chaos` | What happens when it breaks? Four injectors mapped to real production failure modes, beside the verified recovery numbers. |
-| `/app/ledger` | Can I prove what happened? Chain-health bar, one-click integrity check, paginated append-only table, and a per-block drawer with the full hash linkage. |
-| `/app/integration` | How do I wire my agent in? Copy-paste daemon command and MCP config for both transports. |
-
-The Evaluator and Chaos Lab render the verdict from *their own* request rather than the
-newest event on the shared SSE stream — the autonomous loop publishes there too, and
-reading it would answer a question the operator did not ask.
-
-Design tokens live in [`apps/web/tailwind.config.ts`](apps/web/tailwind.config.ts).
-The accent names are semantic rather than chromatic — there is no `green` or `red` to
-reach for, only `approved` and `veto` — so the colour discipline is enforced by the
-class name instead of by memory. A short-circuited gate is deliberately colourless,
-because it made no claim either way. Geist Sans sets the interface; JetBrains Mono with
-`tabular-nums` is reserved for hashes, timestamps and terminal blocks, so columns do not
-jitter as the stream updates.
-
 ---
-
-## Empirical resilience
-
-150 real trials against a live MCP peer over stdio — not a claim, a measurement:
-
-```
-fault              trials  detected  recovered  median     p95        min        max
------------------  ------  --------  ---------  ---------  ---------  ---------  ---------
-latency_spike      50      100%      100%       1.69 ms    2.9 ms     0.84 ms    3.24 ms
-malformed_payload  50      100%      100%       0.47 ms    0.93 ms    0.27 ms    3.26 ms
-peer_crash         50      100%      100%       519.42 ms  595.21 ms  509.25 ms  824.64 ms
-
-ledger chain after 300 blocks: INTACT
-```
-
-Recovery is measured as wall-clock time from the fault clearing to the engine
-committing a healthy `APPROVED` block again. The `peer_crash` figure includes
-respawning the MCP child process. Reproduce with:
-
-```bash
-npm run test:resilience          # 50 trials per class, writes bench-resilience.json
-TRIALS=10 npm run test:resilience
-```
-
----
-
-## Upstream failure handling
-
-The guide names 429 as the failure builders should expect, with `Retry-After`,
-`X-RateLimit-*` headers, and "exponential backoff with jitter for 429, 503, and
-temporary network errors" — while forbidding retries of invalid arguments or unknown
-tools. [`apps/engine/src/mcp/retry.ts`](apps/engine/src/mcp/retry.ts) wraps every HTTP
-request the SDK makes:
-
-- **429 and 503 are retried.** `Retry-After` is honoured in both its forms —
-  delta-seconds and HTTP-date — and capped at `RYO_RETRY_MAX_DELAY_MS`.
-- **Everything else comes straight back.** A 400 is a bug in the request; a 401 is a
-  credential problem that waiting cannot fix. Neither is retried.
-- **Full jitter, not equal jitter.** The wait is uniform in `[0, min(cap, base·2^n)]`.
-  Equal jitter still leaves every client's retries clustered after a shared outage;
-  full jitter spreads them across the whole window, which is the property that actually
-  prevents a thundering herd on recovery.
-- **Every backoff is reported** — attempt, delay, reason, status, whether the wait came
-  from the server or from our own curve, and the quota headers — onto the telemetry bus
-  and into the dashboard. A retry is never an untracked failure.
-
-[`test/retry.test.ts`](apps/engine/test/retry.test.ts) drives all of this against a real
-local HTTP server that really returns 429 with a real `Retry-After`, not a stubbed fetch.
-
-## Schema drift
-
-RYO's envelope is guaranteed; the inner `data` shape belongs to the live catalog. If a
-measurement moves, the naive outcome is silent total failure — `EVIDENCE` fails on every
-token, no error anywhere, and a green test suite.
-
-So the engine probes at boot, costing one tool call, and reports the paths it resolved:
-
-```
-[kura] evidence paths OK — resolved price at data.market.price_usd, ATR(14) at data.technicals.atr_14
-```
-
-and when they move:
-
-```
-[kura] SCHEMA RESOLUTION WARNING: Expected measurement paths not resolved; falling back to strict veto mode
-[kura] could not resolve price and ATR(14) in data — searched price_usd, price, current_price, ...
-```
-
-The warning also lands on `/api/health` and as a banner on the dashboard. Set
-`EVIDENCE_PROBE=0` to skip it.
 
 ## API
 
@@ -353,6 +369,8 @@ The warning also lands on `/api/health` and as a banner on the dashboard. Set
 `DROP` severs the live transport for real and the supervisor reconnects with
 exponential backoff. `DELAY` injects artificial sleep, producing a genuine upstream
 timeout once the ceiling is crossed.
+
+---
 
 ---
 
@@ -393,7 +411,58 @@ on the engine surfaces it next to the tool list KURA expects.
 
 ---
 
-## Position sizing
+---
+
+## Upstream failure handling
+
+The guide names 429 as the failure builders should expect, with `Retry-After`,
+`X-RateLimit-*` headers, and "exponential backoff with jitter for 429, 503, and
+temporary network errors" — while forbidding retries of invalid arguments or unknown
+tools. [`apps/engine/src/mcp/retry.ts`](apps/engine/src/mcp/retry.ts) wraps every HTTP
+request the SDK makes:
+
+- **429 and 503 are retried.** `Retry-After` is honoured in both its forms —
+  delta-seconds and HTTP-date — and capped at `RYO_RETRY_MAX_DELAY_MS`.
+- **Everything else comes straight back.** A 400 is a bug in the request; a 401 is a
+  credential problem that waiting cannot fix. Neither is retried.
+- **Full jitter, not equal jitter.** The wait is uniform in `[0, min(cap, base·2^n)]`.
+  Equal jitter still leaves every client's retries clustered after a shared outage;
+  full jitter spreads them across the whole window, which is the property that actually
+  prevents a thundering herd on recovery.
+- **Every backoff is reported** — attempt, delay, reason, status, whether the wait came
+  from the server or from our own curve, and the quota headers — onto the telemetry bus
+  and into the dashboard. A retry is never an untracked failure.
+
+[`test/retry.test.ts`](apps/engine/test/retry.test.ts) drives all of this against a real
+local HTTP server that really returns 429 with a real `Retry-After`, not a stubbed fetch.
+
+---
+
+## Schema drift
+
+RYO's envelope is guaranteed; the inner `data` shape belongs to the live catalog. If a
+measurement moves, the naive outcome is silent total failure — `EVIDENCE` fails on every
+token, no error anywhere, and a green test suite.
+
+So the engine probes at boot, costing one tool call, and reports the paths it resolved:
+
+```
+[kura] evidence paths OK — resolved price at data.market.price_usd, ATR(14) at data.technicals.atr_14
+```
+
+and when they move:
+
+```
+[kura] SCHEMA RESOLUTION WARNING: Expected measurement paths not resolved; falling back to strict veto mode
+[kura] could not resolve price and ATR(14) in data — searched price_usd, price, current_price, ...
+```
+
+The warning also lands on `/api/health` and as a banner on the dashboard. Set
+`EVIDENCE_PROBE=0` to skip it.
+
+---
+
+## Position sizing detail
 
 **A heuristic volatility-adjusted sizing cap, not a theoretical Kelly proof.** Worth
 stating plainly, because the shape of the formula invites more credit than it deserves:
@@ -436,6 +505,8 @@ one. All parameters are in `.env`.
 
 ---
 
+---
+
 ## Tests
 
 ```bash
@@ -454,6 +525,8 @@ npm run typecheck
 
 ---
 
+---
+
 ## The conformance peer
 
 [`apps/engine/src/conformance/server.ts`](apps/engine/src/conformance/server.ts) is a
@@ -469,27 +542,6 @@ as a fallback**: it is selected only by explicit `.env` configuration, and if th
 configured peer is unreachable the engine fails loudly instead.
 
 ---
-
-## Layout
-
-```
-apps/engine/
-  src/schema/tools.ts          the 7-tool data contract and runtime validator
-  src/mcp/client.ts            live MCP client, HTTP + stdio transports
-  src/mcp/interceptor.ts       chaos injection, timing, envelope unwrapping
-  src/arbiter/invariants.ts    the synchronous zero-fallback gate
-  src/arbiter/kelly.ts         fractional Kelly sizing
-  src/ledger/hash.ts           canonical JSON + SHA-256 chaining
-  src/ledger/ledger.ts         WAL SQLite flight recorder
-  src/bus/telemetry.ts         in-process fan-out for SSE
-  src/pipeline.ts              one decision cycle
-  src/supervisor.ts            connection, heartbeat, reconnect, evaluation loop
-  src/server.ts                Fastify routes
-  bench/demo.ts                npm run demo
-  bench/resilience.ts          npm run test:resilience
-apps/web/app/                  unstyled Next.js 14 dashboard
-skills/verify_provenance/      standalone Python verifier
-```
 
 ---
 
@@ -516,11 +568,3 @@ flyctl secrets set RYO_MCP_KEY=... RYO_MCP_TRANSPORT=http
 
 Vercel can host `apps/web` on its own, but the console would have no engine to talk to —
 it would render with `Upstream down` and no evaluations. Deploy the container instead.
-
-## Notes on the frontend
-
-The dashboard is a pure consumer of the engine's public API. It holds no business
-logic: latency bands, gate labels and signal colours all resolve through
-[`apps/web/app/signal.ts`](apps/web/app/signal.ts), and the failing gate shown in the
-ledger is read from the arbiter's own `invariants_json` rather than inferred from the
-decision. Restyling it cannot change a verdict.
