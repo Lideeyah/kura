@@ -8,6 +8,12 @@ evaluator, the chaos lab under a real HTTP 429, and the audit ledger verifying i
 `kura-demo-walkthrough.mp4` in this repository is the same footage as an offline mirror, **without
 the voiceover** — watch the YouTube cut first.
 
+**Submission form:** [RYOCHAN-Hackthon-Project-Submission-Form.pdf](RYOCHAN-Hackthon-Project-Submission-Form.pdf)
+— the completed three-page form, opened in the browser by GitHub's PDF viewer.
+[KURA-RYOCHAN-Submission-Form.pdf](KURA-RYOCHAN-Submission-Form.pdf) is a byte-identical copy under
+the generator's filename, and [SUBMISSION.md](SUBMISSION.md) is the same content as readable
+Markdown — every field there is the source the PDF is rendered from.
+
 ---
 
 ### The Executive Problem
@@ -256,8 +262,9 @@ python3 skills/verify_provenance/tool.py --all
 ├── skills/
 │   └── verify_provenance/        # Standalone Python 3 cryptographic ledger verifier
 ├── DEMO_SCRIPT.md                # Narration mapped to video timestamps
-├── SUBMISSION.md                 # Official hackathon submission overview
-├── RYOCHAN-Hackthon-Project-Submission-Form.pdf
+├── SUBMISSION.md                 # Submission form content, source of the PDF below
+├── RYOCHAN-Hackthon-Project-Submission-Form.pdf   # Completed submission form
+├── KURA-RYOCHAN-Submission-Form.pdf               # Byte-identical copy, generator filename
 └── kura-demo-walkthrough.mp4     # 73s walkthrough, offline mirror of the YouTube cut
 ```
 
