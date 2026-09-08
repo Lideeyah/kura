@@ -261,7 +261,6 @@ python3 skills/verify_provenance/tool.py --all
 │   └── web/                      # Operations console (:3200)
 ├── skills/
 │   └── verify_provenance/        # Standalone Python 3 cryptographic ledger verifier
-├── DEMO_SCRIPT.md                # Narration mapped to video timestamps
 ├── SUBMISSION.md                 # Submission form content, source of the PDF below
 ├── RYOCHAN-Hackthon-Project-Submission-Form.pdf   # Completed submission form
 ├── KURA-RYOCHAN-Submission-Form.pdf               # Byte-identical copy, generator filename
