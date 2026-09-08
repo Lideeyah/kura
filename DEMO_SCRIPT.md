@@ -68,6 +68,10 @@ profiles carry the exact figures the script speaks (SOL 2.50% ATR, AVAX 11.29%).
 
 ## Re-recording it
 
+Every interaction is driven through a synthetic on-screen pointer with a click pulse
+and a highlight on the target element — Playwright renders no cursor, so without it a
+viewer sees screens changing with no visible cause and cannot reproduce the run.
+
 ```bash
 pkill -f "apps/engine/src/index.ts"; lsof -ti:3200 | xargs -r kill
 rm -f kura_flight_recorder.db*
@@ -80,8 +84,11 @@ ENGINE_ORIGIN=http://localhost:4000 npx --workspace=apps/web next start -p 3200 
 
 npm install --no-save playwright && npx playwright install chromium
 OUT_DIR=.recording/video node .recording/record-demo.mjs
-ffmpeg -i .recording/video/*.webm -t 73 -c:v libx264 -crf 20 -pix_fmt yuv420p \
-  -movflags +faststart kura-demo-walkthrough.mp4
+# Trim the lead-in the recorder reports as LEAD_IN=… . Capture begins when the browser
+# context is created, but the beat clock starts once the landing page has loaded; skip
+# that gap or every beat sits late against the narration.
+ffmpeg -ss <LEAD_IN> -i .recording/video/*.webm -t 73 -c:v libx264 -crf 20 \
+  -pix_fmt yuv420p -movflags +faststart kura-demo-walkthrough.mp4
 ```
 
 The recorder asserts against the live DOM and the engine's own stats before it passes,
