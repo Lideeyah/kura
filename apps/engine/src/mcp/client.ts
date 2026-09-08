@@ -117,7 +117,14 @@ export class RyoClient {
       );
       const transport = buildTransport(this.spec, mode);
       transport.onclose = () => {
-        if (this._connected) {
+        // Over stdio a close means the peer process died — genuinely disconnected.
+        //
+        // Over HTTP it does not. RYO's endpoint is stateless JSON-RPC (it reports
+        // protocol 2024-11-05, and the guide's own examples are bare POSTs), so the
+        // stream closes after each exchange as a matter of course. Treating that as a
+        // disconnect made every second call fail with NOT_CONNECTED at 0ms while the
+        // supervisor sat in reconnect backoff.
+        if (this.spec.transport === 'stdio' && this._connected) {
           this._connected = false;
           this.onStateChange?.(false, 'transport closed');
         }
