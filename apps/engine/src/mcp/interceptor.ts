@@ -7,7 +7,8 @@ import {
   type ToolName,
 } from '../schema/tools.js';
 import { EngineError } from './errors.js';
-import { createRetryingFetch } from './retry.js';
+import { createRetryingFetch, fullJitterDelay, DEFAULT_RETRY_POLICY } from './retry.js';
+import { RatePacer } from './pacer.js';
 import type { RyoClient } from './client.js';
 
 export interface CallResult {
@@ -85,6 +86,15 @@ export function unwrapEnvelope(tool: ToolName, envelope: unknown): unknown {
       .filter((c) => c.type === 'text')
       .map((c) => c.text ?? '')
       .join('\n');
+
+    // RYO signals rate limiting as a *tool* error inside an HTTP 200 — the guide is
+    // explicit that "a tool execution error follows MCP behavior and can be returned
+    // with HTTP 200 and isError: true". The HTTP-level 429 handler never sees this, so
+    // it has to be recognised here or the call fails instantly with no backoff at all.
+    if (/rate.?limit|too many requests|\b429\b|quota exceeded/i.test(text)) {
+      throw new EngineError('UPSTREAM_RATE_LIMITED', `${tool} was rate limited: ${text}`, { tool });
+    }
+
     throw new EngineError('TOOL_ERROR', `${tool} reported isError=true: ${text || '<no detail>'}`, { tool });
   }
 
@@ -119,10 +129,23 @@ export function unwrapEnvelope(tool: ToolName, envelope: unknown): unknown {
  * Every outcome publishes a tool_pulse, so the UI sees failures as clearly as successes.
  */
 export class InterceptedRyo {
+  private readonly pacer: RatePacer;
+
   constructor(
     private readonly client: RyoClient,
     readonly chaos: ChaosController,
-  ) {}
+  ) {
+    this.pacer = new RatePacer(
+      config.mcp.ratePerMinute,
+      undefined,
+      undefined,
+      config.mcp.minCallIntervalMs || undefined,
+    );
+  }
+
+  get quotaRemaining(): number | null {
+    return this.pacer.enabled ? this.pacer.remaining() : null;
+  }
 
   async call(tool: ToolName, args: Record<string, unknown> = {}): Promise<CallResult> {
     const started = performance.now();
@@ -180,11 +203,46 @@ export class InterceptedRyo {
         }
       }
 
-      const envelope = await this.client.rawCall(tool, args, {
-        signal: controller.signal,
-        timeoutMs: config.mcp.requestTimeoutMs,
-      });
-      const raw = unwrapEnvelope(tool, envelope);
+      // Pace first, so we do not provoke a refusal we would then have to retry.
+      await this.pacer.acquire();
+
+      // A tool-level rate limit arrives inside an HTTP 200, so the fetch-level retry
+      // never sees it. Back off here, on the same full-jitter curve, rather than
+      // failing instantly at 0ms with no attempt to recover.
+      let raw: unknown;
+      for (let attempt = 0; ; attempt += 1) {
+        try {
+          const envelope = await this.client.rawCall(tool, args, {
+            signal: controller.signal,
+            timeoutMs: config.mcp.requestTimeoutMs,
+          });
+          raw = unwrapEnvelope(tool, envelope);
+          break;
+        } catch (err) {
+          const limited = err instanceof EngineError && err.code === 'UPSTREAM_RATE_LIMITED';
+          if (!limited || attempt >= config.mcp.retryMaxAttempts - 1) throw err;
+          const delayMs = fullJitterDelay(attempt, {
+            ...DEFAULT_RETRY_POLICY,
+            maxAttempts: config.mcp.retryMaxAttempts,
+            baseDelayMs: config.mcp.retryBaseDelayMs,
+            maxDelayMs: config.mcp.retryMaxDelayMs,
+          });
+          bus.publish({
+            type: 'rate_limit',
+            backoff: {
+              attempt: attempt + 1,
+              ofAttempts: config.mcp.retryMaxAttempts,
+              delayMs,
+              reason: 'RATE_LIMITED',
+              status: 200,
+              fromRetryAfter: false,
+              rateLimit: null,
+              at: new Date().toISOString(),
+            },
+          });
+          await sleep(delayMs);
+        }
+      }
       let payload = validateEnvelope(tool, raw);
 
       // Envelope degradation is applied after validation, so the arbiter sees exactly

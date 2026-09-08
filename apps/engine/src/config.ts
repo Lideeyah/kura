@@ -65,6 +65,18 @@ export const config = {
      * network errors" and "Do not retry invalid arguments or unknown tools".
      */
     retryMaxAttempts: num('RYO_RETRY_MAX_ATTEMPTS', 4),
+    /**
+     * The key's published ceiling, from /whoami and the credential table. Used to pace
+     * outbound calls *before* the server has to refuse them. 0 disables pacing.
+     */
+    ratePerMinute: num('RYO_RATE_PER_MINUTE', 0),
+    /**
+     * Minimum gap between consecutive upstream calls. Defaults to 60000/ratePerMinute,
+     * but the published per-minute figure is not always the binding constraint: live
+     * RYO refuses bursts while still reporting full quota remaining. Set this explicitly
+     * when the observed burst tolerance is tighter than the documented ceiling.
+     */
+    minCallIntervalMs: num('RYO_MIN_CALL_INTERVAL_MS', 0),
     retryBaseDelayMs: num('RYO_RETRY_BASE_DELAY_MS', 500),
     retryMaxDelayMs: num('RYO_RETRY_MAX_DELAY_MS', 20_000),
 
