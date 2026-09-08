@@ -165,7 +165,7 @@ wallet anywhere in the repository. Position sizes are research output, not instr
 | Field | Value |
 |---|---|
 | **Github Repository** | https://github.com/RYO-Digital/ryochan-hackathon_repository-249 (mirror: https://github.com/Lideeyah/kura) |
-| **Demo Video** | https://github.com/Lideeyah/kura/raw/main/kura-demo-walkthrough.mp4 |
+| **Demo Video** | https://youtu.be/1MMqfDH9mUA — mirror: https://github.com/Lideeyah/kura/raw/main/kura-demo-walkthrough.mp4 |
 | **Documentation** | `README.md` in the repository root — architecture, the four invariants, hash-chain construction, gateway tool reference, API surface, and the resilience benchmark |
 
 ---

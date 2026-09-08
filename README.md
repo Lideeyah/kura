@@ -16,6 +16,8 @@ transport, and the terminal now carries its full visual identity.**
 
 ---
 
+**Demo:** https://youtu.be/1MMqfDH9mUA — a 1m13s walkthrough of the evaluator, the chaos lab under a real 429, and the audit ledger verifying its own chain.
+
 ## Threat model and trust assumptions
 
 KURA is **agent black-box auditing and deterministic circuit breaking**. It is not a
