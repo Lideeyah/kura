@@ -148,9 +148,19 @@ export class InterceptedRyo {
   }
 
   async call(tool: ToolName, args: Record<string, unknown> = {}): Promise<CallResult> {
-    const started = performance.now();
     const entry = this.chaos.resolve(tool);
     const controller = new AbortController();
+
+    /**
+     * The FRESHNESS gate asks how stale the upstream's answer is. Our own outbound
+     * throttle is not staleness — it is queueing we chose — so the clock starts after
+     * pacing, not before. Counting a 3s spacing wait as round-trip latency inflated a
+     * healthy 900ms call to 4287ms and vetoed live data on FRESHNESS.
+     *
+     * Chaos DELAY is deliberately still inside the measurement: it exists to stand in
+     * for a slow upstream, so it must read as one.
+     */
+    let started = performance.now();
 
     try {
       if (entry?.action === 'DROP') {
@@ -203,8 +213,9 @@ export class InterceptedRyo {
         }
       }
 
-      // Pace first, so we do not provoke a refusal we would then have to retry.
-      await this.pacer.acquire();
+      // Pace before timing: this wait is ours, not the upstream's.
+      const pacedMs = await this.pacer.acquire();
+      if (pacedMs > 0) started = performance.now();
 
       // A tool-level rate limit arrives inside an HTTP 200, so the fetch-level retry
       // never sees it. Back off here, on the same full-jitter curve, rather than

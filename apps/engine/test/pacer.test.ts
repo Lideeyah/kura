@@ -135,3 +135,25 @@ describe('burst spacing', () => {
     expect(slept).toEqual([250]);
   });
 });
+
+describe('pacing must not be measured as upstream latency', () => {
+  it('is a distinct quantity from the round trip the FRESHNESS gate judges', async () => {
+    // The gate asks how stale the upstream's answer is. A wait we imposed on ourselves
+    // is not staleness — counting it turned a healthy ~900ms live call into 4287ms and
+    // vetoed real market data.
+    let now = 0;
+    const pacer = new RatePacer(60, () => now, async (ms) => { now += ms; }, 3000);
+    await pacer.acquire();
+    const waited = await pacer.acquire();
+    expect(waited).toBe(3000);
+    // acquire() reports what it slept, so the caller can restart its clock afterwards.
+    expect(typeof waited).toBe('number');
+  });
+
+  it('reports zero wait when no pacing was needed, so the clock is left alone', async () => {
+    let now = 0;
+    const pacer = new RatePacer(60, () => now, async (ms) => { now += ms; }, 0);
+    expect(await pacer.acquire()).toBe(0);
+    expect(await pacer.acquire()).toBe(0);
+  });
+});
