@@ -17,5 +17,8 @@
     "conformance": "npm run conformance --workspace=apps/engine",
     "build": "npm run build --workspace=apps/web",
     "demo": "npm run demo --workspace=apps/engine"
+  },
+  "devDependencies": {
+    "playwright": "^1.56.0"
   }
 }

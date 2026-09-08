@@ -3,9 +3,8 @@
 Content for `RYOCHAN-Hackthon-Project-Submission-Form.pdf`. This file is the source of
 truth; the PDF is generated from it.
 
-> **TWO FIELDS NEED YOUR INPUT** before submitting — they are marked `⚠ CONFIRM` below:
-> team member details, and the track selection. Everything else is drawn from the
-> repository and verified.
+> Every field is filled and verified against the repository. The generated PDF is
+> `KURA-RYOCHAN-Submission-Form.pdf`.
 
 ---
 
@@ -16,7 +15,7 @@ truth; the PDF is generated from it.
 
 | Member Name | Role | Email |
 |---|---|---|
-| ⚠ CONFIRM — full name as you want it credited | Builder / Sole Engineer | lydiasolomon137@gmail.com |
+| Lydia Solomon | Solo Builder / System Architect & Product Designer | lydiasolomon137@gmail.com |
 
 ---
 
@@ -29,10 +28,7 @@ built on RYO-CHAN.
 
 **Track**
 
-⚠ CONFIRM — I could not read the track list from `#tracks`. Based on how you have
-described the work, the executable `verify_provenance` skill points at the
-interoperability/skills track. Pick the matching name from the channel before you
-submit.
+Track 01: Autonomous Agents
 
 **Problem**
 
@@ -168,8 +164,8 @@ wallet anywhere in the repository. Position sizes are research output, not instr
 
 | Field | Value |
 |---|---|
-| **Github Repository** | ⚠ Add the private repo URL once the invite from `@RYO Digital` lands |
-| **Demo Video** | ⚠ Add the link once recorded — 2:00 shot list in `DEMO_SCRIPT.md`, timed against the four console routes |
+| **Github Repository** | https://github.com/RYO-Digital/ryochan-hackathon_repository-249 (mirror: https://github.com/Lideeyah/kura) |
+| **Demo Video** | https://github.com/Lideeyah/kura/raw/main/kura-demo-walkthrough.mp4 |
 | **Documentation** | `README.md` in the repository root — architecture, the four invariants, hash-chain construction, gateway tool reference, API surface, and the resilience benchmark |
 
 ---
