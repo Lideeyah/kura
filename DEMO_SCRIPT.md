@@ -1,235 +1,104 @@
-# Kura — Demo Shot List (target 2:00, single take)
+# Kura — Demo Walkthrough
 
-Every number below was measured against the running system, not estimated. Recorded
-against the local conformance peer, so it needs no credential and a judge can reproduce
-it exactly.
+`kura-demo-walkthrough.mp4` — 1920x1080, **1m13s**, recorded by
+`.recording/record-demo.mjs`. The recorder drives to *absolute* beats rather than
+relative sleeps, so a slow evaluation steals from its own hold instead of pushing every
+later scene out of sync with the narration.
+
+Recorded against the local conformance peer: reproducible, zero-credential, and its
+profiles carry the exact figures the script speaks (SOL 2.50% ATR, AVAX 11.29%).
 
 ---
 
-## Pre-flight — do this before you hit record
+## Spoken script, matched to the cut
+
+### Scene 1 — Evaluator & dynamic sizing · 0:00–0:25
+
+> "Autonomous agents fail silently when data feeds degrade. Kura is a deterministic
+> pre-trade firewall.
+>
+> In the console, evaluating SOL passes all four gates in microseconds, allocating a
+> full 100% cap at 2.5% ATR.
+>
+> Evaluating AVAX passes the same gates, but allocation automatically drops to 52% on
+> higher volatility. Zero hallucinated sizing."
+
+| Beat | On screen |
+|---|---|
+| 0:00 | Landing page |
+| 0:06 | Click **Open Console** |
+| 0:08 | Evaluate **SOL** → `APPROVED · 100.000% of cap · ATR 2.50%` |
+| 0:16 | Evaluate **AVAX** → `APPROVED · 51.882% of cap · ATR 11.29%` |
+
+### Scene 2 — Chaos Lab & upstream failures · 0:25–0:50
+
+> "In Chaos Lab, we simulate real upstream failures.
+>
+> Triggering an upstream rate limit doesn't crash the loop. Kura parses the server's
+> Retry-After header, enters backoff with jitter, and safely vetoes the trade when
+> latency breaches our freshness threshold.
+>
+> Simulating synthetic data instantly trips our provenance gate — non-live data never
+> touches capital."
+
+| Beat | On screen |
+|---|---|
+| 0:25 | Chaos Lab |
+| 0:28 | **Rate-limit the upstream** → backoff rows `429 · 1000ms · server Retry-After`, then `VETO_HALT · FRESHNESS breached: 2011ms > 1200ms (UPSTREAM_RATE_LIMITED)` |
+| 0:40 | **Mark the feed non-live** → `VETO_HALT · PROVENANCE · data_mode="simulated" is not live` |
+| 0:48 | Clear all injected faults |
+
+### Scene 3 — Cryptographic audit ledger · 0:50–1:13
+
+> "Every decision is committed to an append-only SQLite hash chain.
+>
+> Here are the five blocks from our evaluations: three approved, two vetoed. Clicking
+> Verify recomputes every SHA-256 digest in sub-milliseconds — chain intact, zero
+> tampering.
+>
+> Deterministic safety and full auditability, strictly compliant with Rule 6.05."
+
+| Beat | On screen |
+|---|---|
+| 0:50 | Audit Ledger — `BLOCKS EVALUATED 5 · VETOES ENFORCED 2 · APPROVALS 3` |
+| 0:58 | **Verify Hash Chain Integrity** → `CHAIN INTACT: 5/5 blocks verified (0 tampering detected)` |
+| 1:05 | Open a block → parent / payload / block digests, `Block verified — recomputed in ~0.3ms` |
+
+---
+
+## Re-recording it
 
 ```bash
-cd KURA
-lsof -ti:4000 | xargs -r kill          # clear a stale engine
-lsof -ti:3200 | xargs -r kill
-rm -f kura_flight_recorder.db*         # start from genesis
+pkill -f "apps/engine/src/index.ts"; lsof -ti:3200 | xargs -r kill
+rm -f kura_flight_recorder.db*
 
-# Autonomous loop OFF and a two-symbol watchlist, so the ledger contains ONLY the
-# evaluations you perform on camera. This is what makes Scene 3 land.
-AUTO_EVALUATE=0 KURA_WATCHLIST=SOL,AVAX npx kura start
+RYO_MCP_TRANSPORT=stdio AUTO_EVALUATE=0 KURA_WATCHLIST=SOL,AVAX \
+  INV_MAX_LATENCY_MS=1200 RYO_RATE_PER_MINUTE=0 npx kura start &
 
-# second terminal
-npm run dev:web                        # http://localhost:3000
+npm run build --workspace=apps/web
+ENGINE_ORIGIN=http://localhost:4000 npx --workspace=apps/web next start -p 3200 &
+
+npm install --no-save playwright && npx playwright install chromium
+OUT_DIR=.recording/video node .recording/record-demo.mjs
+ffmpeg -i .recording/video/*.webm -t 73 -c:v libx264 -crf 20 -pix_fmt yuv420p \
+  -movflags +faststart kura-demo-walkthrough.mp4
 ```
 
-**Then run one throwaway evaluation and discard it.** The first gate call on a cold
-process pays ~300 µs of V8 JIT warm-up; every one after is 20–80 µs. Record the cold one
-and you undersell the breaker by 5×.
-
-Browser window ~1440px wide. Console content caps at 1240px, so anything wider only adds
-margin.
-
-Keep a terminal one keystroke away. You won't need it, but if a judge asks "is that
-real?", `python3 skills/verify_provenance/tool.py --all --quiet` is the answer.
+The recorder asserts against the live DOM and the engine's own stats before it passes,
+so a silent regression fails the run rather than yielding a quietly wrong video. It also
+aborts if the ledger is non-empty at startup — a stale engine appending to the same
+SQLite file is what produced a wrong block count on an earlier take.
 
 ---
 
-## Scene 1 — Landing → the clean path  (0:00–0:40)
+## Narration notes
 
-**Start on `/`.** Do not scroll. The headline is the framing.
-
-> "Kura is a deterministic pre-trade execution firewall for autonomous agents. Pre-trade
-> invariant verification and a cryptographic audit trail, before capital is committed."
-
-**[0:08]** Click **Open Console** → `/app/evaluator`.
-
-**[0:12]** `SOL` is already in the candidate field. Click **Evaluate Candidate**.
-
-Expected on screen:
-
-```
-TARGET  SOL/USDC    VERDICT  APPROVED    SIZING ALLOCATION  100.000% of bankroll cap
-GATE TIME <read it>   ROUND TRIP ~1-3ms   UPSTREAM STATUS ok   DATA MODE live
-```
-
-> "Four gates, all green, in tens of microseconds — with no language model anywhere in
-> that path. The allocation is a hundred percent of a hard risk cap, not a dollar
-> mandate."
-
-⚠ **Say "tens of microseconds", not a specific figure.** Measured across 12 consecutive
-runs: min 11 µs, median 29 µs, max 137 µs — and the *first* evaluation after the page
-loads can read a couple of hundred, because it pays cache and allocation costs the rest
-do not. Naming a number you then have to contradict on screen is the one thing worth
-avoiding here.
-
-**[0:24]** Click the **EVIDENCE FLOOR** row to expand it, then **scroll down ~420px** to
-bring the whole JSON block and the heuristic-sizing note beneath it into view — at 1080p
-both sit below the fold. Hold about five seconds, then scroll straight back to the top so
-the candidate bar and the Evaluate button are on screen before the next step.
-
-> "Every gate shows the exact field it read. This one resolved price and ATR-14 out of
-> the live payload — and if it couldn't find them, it vetoes rather than substituting a
-> zero."
-
-**[0:32]** Click the **AVAX** quick-pick, then **Evaluate Candidate**.
-
-```
-AVAX/USDC   APPROVED   51.882% of bankroll cap
-```
-
-> "Same four gates, half the allocation — because AVAX carries an eleven percent ATR
-> against SOL's two and a half. The sizing moves with measured volatility. Nothing here
-> is hardcoded."
-
-*This is the shot that kills the "the number is fake" suspicion. Don't skip it.*
-
----
-
-## Scene 2 — Adversarial chaos and a real 429  (0:40–1:25)
-
-**[0:40]** Click **Chaos Lab** in the nav.
-
-> "Four injectors, each mapped to a real upstream failure mode."
-
-**[0:45]** Fire **Rate-limit the upstream → Inject**.
-
-⚠ **This takes about two seconds of visible waiting — that is the point, not a stall.**
-Narrate straight through it:
-
-> "It's waiting out the server's Retry-After right now. This is the same retry wrapper
-> that goes around every live HTTP request — real 429, real Retry-After header, and full
-> jitter when the server doesn't send one."
-
-Expected in **Backoff activity** (right column):
-
-```
-429 · 1000ms   attempt 1/3 · server Retry-After
-429 · 1000ms   attempt 2/3 · server Retry-After
-```
-
-And in **Last verdict under fire**:
-
-```
-SOL   VETO_HALT   breaker <tens of µs>   FRESHNESS
-FRESHNESS breached: ~2007 ms > 1200 ms (UPSTREAM_RATE_LIMITED)
-```
-
-**[1:02]**
-
-> "Two seconds of retries genuinely blew the freshness budget, so it halted — and the
-> reason names the cause. It doesn't just say 'slow', it says rate-limited, so nobody
-> goes hunting for a network fault that isn't there."
-
-**[1:08]** Fire **Mark the feed non-live → Inject**.
-
-```
-SOL   VETO_HALT   breaker <tens of µs>   PROVENANCE
-PROVENANCE rejected: data_mode="simulated" is not live
-```
-
-⚠ **Don't promise "sub-50 µs".** Observed values for this veto range from the low tens to
-around 140 µs. "Tens of microseconds" is true every time; a specific figure is not.
-
-> "Complete, fresh, and fake. RYO publishes the provenance of every measurement, and Kura
-> refuses to size capital against anything that isn't a live read. Tens of microseconds —
-> and the gate below it was never evaluated. There's no fallback branch to take."
-
-Note the line under the verdict: *data_mode is RYO's own provenance field. Kura did not
-generate this value — it read it, and refused to size capital against it.* If anyone
-watching wonders whether Kura is faking its own inputs, that sentence is the answer.
-
-**[1:20]** Click **Clear All Injected Faults**.
-
----
-
-## Scene 3 — Cryptographic verification  (1:25–1:55)
-
-**[1:25]** Click **Audit Ledger** in the nav.
-
-```
-BLOCKS EVALUATED 5   VETOES ENFORCED 2   APPROVALS 3   CHAIN HEAD 0213096120a9cc33…
-```
-
-> "Five blocks — exactly the five evaluations you just watched. Append-only, and each one
-> chained to the block before it."
-
-*The count is whatever is on your screen. With the pre-flight above it stays small and
-matches what the viewer just saw — which is the entire reason to turn the autonomous loop
-off.*
-
-**[1:34]** Click **Verify Hash Chain Integrity**.
-
-```
-CHAIN INTACT: 5/5 blocks verified (0 tampering detected)
-```
-
-**[1:40]** Click any **VETO_HALT** row → the drawer slides in from the right.
-
-> "Parent digest, payload digest, block digest — and the raw payload those hashes actually
-> cover."
-
-Point at `✓ Block verified — recomputed in 0.288ms`.
-
-> "Recomputed live, in under a third of a millisecond. And that command at the bottom is a
-> standalone Python tool that shares no code with the engine — a judge can run it in their
-> own terminal against the same file."
-
----
-
-## Closing  (1:55–2:00)
-
-> "Read-only by construction. No signing keys, no wallet, no execution path — and no model
-> guesses in the decision. Rule 6.05 compliant by design, not by policy."
-
----
-
-## Optional 15s tail — only if the take runs short
-
-```bash
-npm run demo
-```
-
-Scroll to step 7:
-
-```
-── 7. a forged row is detected ──
-   forged seq 3 (SOL) on disk
-   → CHAIN BROKEN at seq 3: PAYLOAD_HASH_MISMATCH, BLOCK_HASH_MISMATCH
-```
-
-> "Alter one historical record and the chain breaks at exactly that block, naming which
-> hash failed. That's the difference between a log and a ledger."
-
----
-
-## Timing budget
-
-| Scene | Window | Slack |
-|---|---|---|
-| 1 — Landing + clean path | 0:00–0:40 | comfortable |
-| 2 — Chaos + 429 | 0:40–1:25 | **tight** — the 429 eats ~2s of it |
-| 3 — Ledger + verification | 1:25–1:55 | comfortable |
-| Close | 1:55–2:00 | — |
-
-If you overrun, cut the **EVIDENCE FLOOR** row expansion first — it is the most expendable
-and the least surprising to a judge. Cut the **AVAX** evaluation last; it is doing the most
-persuasive work in the whole video.
-
----
-
-## Things not to say
-
-- **Don't say "honeypot detection" or "liquidity floor."** Those gates were built against
-  a `check_safety` tool RYO does not publish, and were removed. Trivially disprovable.
-- **Don't call the conformance peer a mock**, and don't say "simulate" about the chaos
-  injectors. Both undercut the entire pitch. The peer is a real MCP server over real
-  stdio publishing the real envelope; the injectors apply real faults to the live
-  transport. The one place `simulated` appears on screen is the value of RYO's own
-  `data_mode` field — say "RYO is telling us this reading isn't live, and Kura refuses
-  it", never "we simulated the data".
-- **Don't say the ledger proves the data is true.** It proves what the agent observed and
-  that the record wasn't altered afterwards. There is no signature from RYO. That boundary
-  is written up in the README's Threat Model section, and saying it out loud reads as
-  maturity, not weakness.
-- **Don't claim a live-endpoint run** unless you have done one by recording time.
-- **Don't show `.env` on camera** once your real key is in it.
+- **Say "sub-millisecond circuit breaking, typically 20–80 microseconds."** Measured
+  across 12 consecutive runs: min 11µs, median 29µs, max 137µs, with the first
+  evaluation after a page load reading a couple of hundred. "Sub-100µs" is checkable and
+  occasionally wrong; this phrasing is impressive and bulletproof.
+- **Don't call the conformance peer a mock.** It is a real MCP server over real stdio
+  publishing the real six-tool envelope.
+- **Don't say the ledger proves the data is true.** It proves what the agent observed
+  and that the record was not altered afterwards. The Threat Model section in README.md
+  states the boundary.
