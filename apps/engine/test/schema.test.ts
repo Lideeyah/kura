@@ -182,3 +182,84 @@ describe('boot-time evidence probe', () => {
     expect(p.detail).toContain('could not resolve price and ATR(14)');
   });
 });
+
+describe('the real live RYO payload shape', () => {
+  /**
+   * Captured verbatim from https://app-ryochan.com/api/mcp on 2026-09-08 with a real
+   * builder key. Pinned because the ATR field is a percentage, not an absolute — a
+   * distinction that fails silently and in a price-dependent way if it is ever lost.
+   */
+  const live = () =>
+    envelope({
+      as_of: new Date().toISOString(),
+      data: {
+        asset: { symbol: 'SOL', name: 'Solana', chain: 'solana', rank: 5 },
+        market: {
+          price_usd: 102.8507617609701,
+          market_cap_usd: 5.6e10,
+          volume_24h_usd: 3.1e9,
+        },
+        performance: { change_1h_pct: 0.4, change_24h_pct: 2.1, change_7d_pct: -3.2 },
+        technical_analysis: {
+          trend: 'up',
+          rsi_14: 63.3,
+          momentum_30d_pct: 34.87106998,
+          atr_14_pct: 4.23,
+        },
+        intelligence: { narrative: 'x', catalysts: [], risks: [] },
+        verdict: 'constructive',
+      },
+      availability: {
+        market_data: 'available',
+        technical_analysis: 'available',
+        market_intelligence: 'available',
+      },
+      warnings: [],
+      summary: { headline: 'SOL', key_points: [] },
+    });
+
+  it('validates against the envelope schema unchanged', () => {
+    const parsed = validateEnvelope('analyze_token', live());
+    expect(parsed.status).toBe('ok');
+    expect(parsed.data_mode).toBe('live');
+  });
+
+  it('resolves price and ATR at their real paths', () => {
+    const p = probeEvidence(validateEnvelope('analyze_token', live()));
+    expect(p.resolved).toBe(true);
+    expect(p.pricePath).toBe('market.price_usd');
+    expect(p.atrPath).toBe('technical_analysis.atr_14_pct');
+    expect(p.atrForm).toBe('percentage');
+    expect(p.rsiPath).toBe('technical_analysis.rsi_14');
+  });
+
+  it('reads atr_14_pct as a percentage, NOT as an absolute divided by price', () => {
+    const s = extractSignals(validateEnvelope('analyze_token', live()), 1)!;
+    // 4.23% is 0.0423. The naive reading, 4.23 / 102.85, gives 0.0411 — close enough
+    // at this price to pass a careless eye, and wrong.
+    expect(s.atrPct).toBeCloseTo(0.0423, 10);
+    expect(s.atrPct).not.toBeCloseTo(4.23 / 102.8507617609701, 6);
+  });
+
+  it('stays correct on a low-priced asset, where the naive reading explodes', () => {
+    const cheap = live();
+    (cheap.data as any).market.price_usd = 0.5;
+    const s = extractSignals(validateEnvelope('analyze_token', cheap), 1)!;
+    // Naive would be 4.23/0.5 = 8.46 → 846% ATR → HYPER_VOLATILITY on every cheap token.
+    expect(s.atrPct).toBeCloseTo(0.0423, 10);
+    expect(s.atr14).toBeCloseTo(0.02115, 10);
+  });
+
+  it('still supports an absolute ATR when that is all the payload offers', () => {
+    const abs = live();
+    delete (abs.data as any).technical_analysis.atr_14_pct;
+    (abs.data as any).technical_analysis.atr_14 = 4.31;
+    const s = extractSignals(validateEnvelope('analyze_token', abs), 1)!;
+    expect(s.atr14).toBe(4.31);
+    expect(s.atrPct).toBeCloseTo(4.31 / 102.8507617609701, 10);
+  });
+
+  it('scores the live availability vocabulary correctly', () => {
+    expect(completeness(live().availability as Record<string, unknown>)).toBe(1);
+  });
+});

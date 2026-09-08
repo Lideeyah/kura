@@ -142,22 +142,24 @@ export class Supervisor {
         resolved: false,
         pricePath: null,
         atrPath: null,
+        atrForm: null,
         rsiPath: null,
         detail: `probe call failed: ${err instanceof Error ? err.message : String(err)}`,
       };
     }
 
-    if (this.evidence.resolved) {
-      process.stderr.write(`[kura] evidence paths OK — ${this.evidence.detail}\n`);
+    const probe = this.evidence;
+    if (probe.resolved) {
+      process.stderr.write(`[kura] evidence paths OK — ${probe.detail}\n`);
     } else {
       const warning =
         'SCHEMA RESOLUTION WARNING: Expected measurement paths not resolved; ' +
         'falling back to strict veto mode';
-      process.stderr.write(`[kura] ${warning}\n[kura] ${this.evidence.detail}\n`);
+      process.stderr.write(`[kura] ${warning}\n[kura] ${probe.detail}\n`);
       bus.publish({
         type: 'error',
         code: 'SCHEMA_RESOLUTION_WARNING',
-        message: `${warning} — ${this.evidence.detail}`,
+        message: `${warning} — ${probe.detail}`,
         at: new Date().toISOString(),
       });
     }

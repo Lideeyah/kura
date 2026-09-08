@@ -27,7 +27,22 @@ export interface SizingSignals {
 }
 
 const PRICE_KEYS = ['price_usd', 'price', 'current_price', 'usd_price', 'last_price'];
-const ATR_KEYS = ['atr_14', 'atr14', 'atr', 'atr_value'];
+
+/**
+ * ATR arrives in one of two forms, and confusing them is a silent, price-dependent
+ * error rather than a loud one.
+ *
+ * Live RYO returns `technical_analysis.atr_14_pct` — ATR *already expressed as a
+ * percentage of price* (4.23 meaning 4.23%). Treating that as an absolute ATR and
+ * dividing by price gives 4.23/102.85 = 0.0411 instead of 0.0423: close enough at a
+ * three-figure price to look right, and catastrophically wrong at a low one. The same
+ * 4.23% on a $0.50 asset would compute as 8.46 — 846% — tripping HYPER_VOLATILITY and
+ * vetoing every cheap token.
+ *
+ * So the two forms are matched separately and converted differently.
+ */
+const ATR_PCT_KEYS = ['atr_14_pct', 'atr_pct', 'atr_14_percent', 'atr_percent'];
+const ATR_ABS_KEYS = ['atr_14', 'atr14', 'atr', 'atr_value'];
 const RSI_KEYS = ['rsi_14', 'rsi14', 'rsi', 'rsi_value'];
 
 interface Found {
@@ -73,6 +88,8 @@ export interface EvidenceProbe {
   resolved: boolean;
   pricePath: string | null;
   atrPath: string | null;
+  /** Which ATR form resolved — the conversion differs and getting it wrong is silent. */
+  atrForm: 'percentage' | 'absolute' | null;
   rsiPath: string | null;
   detail: string;
 }
@@ -86,18 +103,24 @@ export interface EvidenceProbe {
  */
 export function probeEvidence(envelope: RyoEnvelope): EvidenceProbe {
   const price = find(envelope.data, PRICE_KEYS);
-  const atr = find(envelope.data, ATR_KEYS);
+  const atrPct = find(envelope.data, ATR_PCT_KEYS);
+  const atrAbs = find(envelope.data, ATR_ABS_KEYS);
   const rsi = find(envelope.data, RSI_KEYS);
+
+  const atr = atrPct ?? atrAbs;
+  const atrForm = atrPct ? ('percentage' as const) : atrAbs ? ('absolute' as const) : null;
   const missing = [!price && 'price', !atr && 'ATR(14)'].filter(Boolean) as string[];
+
   return {
     resolved: price !== null && atr !== null,
     pricePath: price?.path ?? null,
     atrPath: atr?.path ?? null,
+    atrForm,
     rsiPath: rsi?.path ?? null,
     detail:
       missing.length === 0
-        ? `resolved price at data.${price!.path}, ATR(14) at data.${atr!.path}`
-        : `could not resolve ${missing.join(' and ')} in data — searched ${[...PRICE_KEYS, ...ATR_KEYS].join(', ')}`,
+        ? `resolved price at data.${price!.path}, ATR(14) at data.${atr!.path} (${atrForm} form)`
+        : `could not resolve ${missing.join(' and ')} in data — searched ${[...PRICE_KEYS, ...ATR_PCT_KEYS, ...ATR_ABS_KEYS].join(', ')}`,
   };
 }
 
@@ -106,15 +129,30 @@ export function extractSignals(
   completenessValue: number | null,
 ): SizingSignals | null {
   const price = findNumber(envelope.data, PRICE_KEYS);
-  const atr = findNumber(envelope.data, ATR_KEYS);
+  if (price === null || price <= 0) return null;
 
-  // No price or no volatility measurement means no defensible size. Veto, never guess.
-  if (price === null || atr === null || price <= 0 || atr < 0) return null;
+  // Percentage form wins when both are present: it is what live RYO publishes, and it
+  // needs no division by price, so it cannot drift with the asset's nominal value.
+  const atrPctField = findNumber(envelope.data, ATR_PCT_KEYS);
+  const atrAbsField = findNumber(envelope.data, ATR_ABS_KEYS);
+
+  let atrPct: number;
+  let atr14: number;
+  if (atrPctField !== null && atrPctField >= 0) {
+    atrPct = atrPctField / 100;
+    atr14 = atrPct * price;
+  } else if (atrAbsField !== null && atrAbsField >= 0) {
+    atr14 = atrAbsField;
+    atrPct = atr14 / price;
+  } else {
+    // No volatility measurement means no defensible size. Veto, never guess.
+    return null;
+  }
 
   return {
     priceUsd: price,
-    atr14: atr,
-    atrPct: atr / price,
+    atr14,
+    atrPct,
     rsi14: findNumber(envelope.data, RSI_KEYS),
     completeness: completenessValue,
   };
