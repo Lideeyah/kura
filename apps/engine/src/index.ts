@@ -15,13 +15,18 @@ async function main() {
   }
 
   const app = buildServer(sup);
+
+  // Connect before the port opens. Listening first left a window where an evaluation
+  // was accepted with no MCP session behind it, and came back VETOED on FRESHNESS
+  // citing NOT_CONNECTED at rtt 0ms — the engine's own cold start misreported as
+  // upstream staleness. Connection failures stay non-fatal: the supervisor retries
+  // with backoff and the dashboard shows the disconnected state rather than the
+  // process dying, so a boot with RYO-CHAN unreachable still serves.
+  await sup.start();
+
   await app.listen({ port: config.port, host: '0.0.0.0' });
   console.log(`[kura] engine listening on http://localhost:${config.port}`);
   console.log(`[kura] ledger  ${config.ledger.path} (journal_mode=${sup.ledger.journalMode})`);
-
-  // Connection failures are non-fatal: the supervisor retries with backoff and the
-  // dashboard shows the disconnected state rather than the process dying.
-  await sup.start();
   console.log(`[kura] mcp     ${sup.client.description} connected=${sup.connected}`);
 
   const shutdown = async () => {

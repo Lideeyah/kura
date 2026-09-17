@@ -53,7 +53,9 @@ export function buildServer(sup: Supervisor) {
   });
 
   app.get('/api/health', async () => ({
-    ok: true,
+    // Readiness, not liveness: a reachable process with no upstream session cannot
+    // evaluate anything, so reporting ok:true there would be a false green.
+    ok: sup.connected,
     connected: sup.connected,
     transport: sup.client.description,
     connect_error: sup.connectError,
