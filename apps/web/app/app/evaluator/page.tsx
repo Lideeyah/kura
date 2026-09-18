@@ -199,6 +199,20 @@ function evidenceFor(id: string, raw: string | null): string {
   } catch {
     return raw;
   }
+  // CONTEXT reads a different tool, so it is resolved before the analyze_token guard:
+  // the market read can fail while the token read succeeded, and vice versa.
+  if (id === 'CONTEXT') {
+    return JSON.stringify(
+      {
+        market_context: parsed.market_context,
+        context_fault: parsed.context_fault,
+        market_overview: parsed.market_overview,
+      },
+      null,
+      2,
+    );
+  }
+
   const env = parsed.analyze_token;
   if (!env) return JSON.stringify({ fault: parsed.fault }, null, 2);
 

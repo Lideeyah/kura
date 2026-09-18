@@ -132,6 +132,7 @@ export const GATE_LABEL: Record<string, string> = {
   ORACLE: 'ORACLE INTEGRITY',
   PROVENANCE: 'DATA PROVENANCE',
   EVIDENCE: 'EVIDENCE FLOOR',
+  CONTEXT: 'MARKET CONTEXT',
 };
 
 /** data_mode is the provenance signal: only a live read may size capital. */

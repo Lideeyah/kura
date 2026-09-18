@@ -25,7 +25,7 @@ export interface ToolPulse {
   detail?: string;
 }
 
-export type InvariantId = 'FRESHNESS' | 'ORACLE' | 'PROVENANCE' | 'EVIDENCE';
+export type InvariantId = 'FRESHNESS' | 'ORACLE' | 'PROVENANCE' | 'EVIDENCE' | 'CONTEXT';
 export type InvariantState = 'PASS' | 'FAIL' | 'NOT_EVALUATED';
 
 export interface InvariantResult {

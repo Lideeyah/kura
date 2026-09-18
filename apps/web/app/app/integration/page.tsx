@@ -98,7 +98,7 @@ export default function IntegrationPage() {
         <Panel title="Gateway tools">
           <dl className="divide-y divide-border">
             {[
-              ['evaluate_candidate', 'Runs the four invariants, commits the verdict, returns APPROVED with a bounded allocation or VETOED with the failing gate — plus a receipt id and block hash.'],
+              ['evaluate_candidate', 'Runs the five invariants, commits the verdict, returns APPROVED with a bounded allocation or VETOED with the failing gate — plus a receipt id and block hash.'],
               ['gate_policy', 'The thresholds and sizing parameters in force, so the agent knows the rules before it asks.'],
               ['verify_receipt', 'Recomputes the hashes for a past decision and re-checks its parent link.'],
               ['get_receipt', 'The full record, including the canonical raw payload the hash covers.'],
