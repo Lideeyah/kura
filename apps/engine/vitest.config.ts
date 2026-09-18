@@ -29,6 +29,9 @@ export default defineConfig({
       KELLY_MAX_POSITION_PCT: '0.05',
       KELLY_MAX_ATR_PCT: '0.15',
       KELLY_HYPER_VOL_ATR_PCT: '0.5',
+      KELLY_BREADTH_REF: '0.5',
+      KELLY_MIN_CONTEXT_MULT: '0.25',
+      INV_MAX_CONTEXT_AGE_MS: '60000',
       // No outbound pacing in tests: it would add real wall-clock sleeps for nothing.
       RYO_RATE_PER_MINUTE: '0',
       RYO_MIN_CALL_INTERVAL_MS: '0',

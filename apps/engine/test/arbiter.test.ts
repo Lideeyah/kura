@@ -1,5 +1,6 @@
 import { describe, expect, it } from 'vitest';
-import { evaluate } from '../src/arbiter/invariants.js';
+import { evaluate, type ArbiterInput } from '../src/arbiter/invariants.js';
+import type { MarketContext } from '../src/arbiter/context.js';
 import { sizePosition } from '../src/arbiter/kelly.js';
 import type { SizingSignals } from '../src/arbiter/signals.js';
 import { validateEnvelope, type RyoEnvelope } from '../src/schema/tools.js';
@@ -28,11 +29,30 @@ const sig = (over: Partial<SizingSignals> = {}): SizingSignals => ({
   ...over,
 });
 
+const ctx = (over: Partial<MarketContext> = {}): MarketContext => ({
+  regime: 'risk_on',
+  fearGreed: 68,
+  // Comfortably above KELLY_BREADTH_REF, so the context multiplier is exactly 1 and
+  // these cases keep measuring the gate they were written for rather than the clamp.
+  breadth: 0.93,
+  ageMs: 1_000,
+  status: 'ok',
+  dataMode: 'live',
+  ...over,
+});
+
+/**
+ * Every case below predates the CONTEXT gate. Defaulting the context to healthy keeps
+ * each one testing its own invariant; the CONTEXT cases pass it explicitly.
+ */
+const run = (input: Omit<ArbiterInput, 'context'> & { context?: MarketContext | null }) =>
+  evaluate({ context: ctx(), ...input });
+
 const staleAsOf = () => new Date(Date.now() - 3_600_000).toISOString();
 
 describe('invariant arbiter', () => {
-  it('APPROVES when all four gates pass, and sizes a position', () => {
-    const v = evaluate({ token: 'SOL', latencyMs: 42, envelope: env(), signals: sig() });
+  it('APPROVES when all five gates pass, and sizes a position', () => {
+    const v = run({ token: 'SOL', latencyMs: 42, envelope: env(), signals: sig() });
     expect(v.decision).toBe('APPROVED');
     expect(v.failedInvariant).toBeNull();
     expect(v.invariants.every((i) => i.state === 'PASS')).toBe(true);
@@ -41,15 +61,15 @@ describe('invariant arbiter', () => {
 
   it('VETOES on FRESHNESS at 1201 ms and passes at exactly 1200 ms', () => {
     expect(
-      evaluate({ token: 'SOL', latencyMs: 1201, envelope: env(), signals: sig() }).failedInvariant,
+      run({ token: 'SOL', latencyMs: 1201, envelope: env(), signals: sig() }).failedInvariant,
     ).toBe('FRESHNESS');
     expect(
-      evaluate({ token: 'SOL', latencyMs: 1200, envelope: env(), signals: sig() }).decision,
+      run({ token: 'SOL', latencyMs: 1200, envelope: env(), signals: sig() }).decision,
     ).toBe('APPROVED');
   });
 
   it('VETOES on FRESHNESS when the observation itself is stale', () => {
-    const v = evaluate({
+    const v = run({
       token: 'SOL', latencyMs: 10, envelope: env({ as_of: staleAsOf() }), signals: sig(),
     });
     expect(v.failedInvariant).toBe('FRESHNESS');
@@ -57,7 +77,7 @@ describe('invariant arbiter', () => {
   });
 
   it('VETOES on FRESHNESS when no envelope came back at all', () => {
-    const v = evaluate({
+    const v = run({
       token: 'SOL', latencyMs: 10, envelope: null, signals: null,
       fault: { code: 'TRANSPORT_DROPPED', message: 'connection severed' },
     });
@@ -67,7 +87,7 @@ describe('invariant arbiter', () => {
   });
 
   it('VETOES on ORACLE for status "partial" — a gap is a refusal, not a degradation', () => {
-    const v = evaluate({
+    const v = run({
       token: 'X', latencyMs: 10, envelope: env({ status: 'partial' }), signals: sig(),
     });
     expect(v.failedInvariant).toBe('ORACLE');
@@ -76,13 +96,13 @@ describe('invariant arbiter', () => {
 
   it('VETOES on ORACLE for status "unavailable"', () => {
     expect(
-      evaluate({ token: 'X', latencyMs: 10, envelope: env({ status: 'unavailable' }), signals: sig() })
+      run({ token: 'X', latencyMs: 10, envelope: env({ status: 'unavailable' }), signals: sig() })
         .failedInvariant,
     ).toBe('ORACLE');
   });
 
   it('VETOES on PROVENANCE for simulated data', () => {
-    const v = evaluate({
+    const v = run({
       token: 'X', latencyMs: 10, envelope: env({ data_mode: 'simulated' }), signals: sig(),
     });
     expect(v.failedInvariant).toBe('PROVENANCE');
@@ -93,29 +113,30 @@ describe('invariant arbiter', () => {
   it('VETOES on PROVENANCE for mixed and unknown too — only live sizes capital', () => {
     for (const mode of ['mixed', 'unknown'] as const) {
       expect(
-        evaluate({ token: 'X', latencyMs: 10, envelope: env({ data_mode: mode }), signals: sig() })
+        run({ token: 'X', latencyMs: 10, envelope: env({ data_mode: mode }), signals: sig() })
           .failedInvariant,
       ).toBe('PROVENANCE');
     }
   });
 
   it('VETOES on EVIDENCE when the required measurements are absent', () => {
-    const v = evaluate({ token: 'X', latencyMs: 10, envelope: env(), signals: null });
+    const v = run({ token: 'X', latencyMs: 10, envelope: env(), signals: null });
     expect(v.failedInvariant).toBe('EVIDENCE');
     expect(v.sizing).toBeNull();
   });
 
   it('short-circuits: gates after the first failure are NOT_EVALUATED', () => {
-    const v = evaluate({ token: 'X', latencyMs: 5_000, envelope: env(), signals: sig() });
+    const v = run({ token: 'X', latencyMs: 5_000, envelope: env(), signals: sig() });
     expect(v.invariants.filter((i) => i.state === 'NOT_EVALUATED').map((i) => i.id)).toEqual([
       'ORACLE',
       'PROVENANCE',
       'EVIDENCE',
+      'CONTEXT',
     ]);
   });
 
   it('is a synchronous function, so it cannot await a degraded upstream', () => {
-    const v = evaluate({ token: 'SOL', latencyMs: 10, envelope: env(), signals: sig() });
+    const v = run({ token: 'SOL', latencyMs: 10, envelope: env(), signals: sig() });
     expect(v).not.toBeInstanceOf(Promise);
     expect(typeof (v as unknown as { then?: unknown }).then).toBe('undefined');
   });
@@ -123,7 +144,7 @@ describe('invariant arbiter', () => {
   it('terminates a hostile condition in well under 1 ms', () => {
     const t0 = performance.now();
     for (let i = 0; i < 1000; i += 1) {
-      evaluate({
+      run({
         token: 'X', latencyMs: 10, envelope: null, signals: null,
         fault: { code: 'TRANSPORT_DROPPED', message: 'severed' },
       });
@@ -132,7 +153,7 @@ describe('invariant arbiter', () => {
   });
 
   it('surfaces status and data_mode on the verdict for the ledger', () => {
-    const v = evaluate({ token: 'SOL', latencyMs: 10, envelope: env(), signals: sig() });
+    const v = run({ token: 'SOL', latencyMs: 10, envelope: env(), signals: sig() });
     expect(v.status).toBe('ok');
     expect(v.dataMode).toBe('live');
     expect(v.asOfAgeMs).not.toBeNull();
@@ -221,7 +242,7 @@ describe('hyper-volatility refusal and the illustrative framing', () => {
 
 describe('fault attribution on a slow round-trip', () => {
   it('names the underlying fault when latency breached because of one', () => {
-    const v = evaluate({
+    const v = run({
       token: 'SOL', latencyMs: 2004, envelope: null, signals: null,
       fault: { code: 'UPSTREAM_RATE_LIMITED', message: 'retry budget exhausted' },
     });
@@ -230,7 +251,7 @@ describe('fault attribution on a slow round-trip', () => {
   });
 
   it('reports a plain breach when latency was slow for no attributable reason', () => {
-    const v = evaluate({ token: 'SOL', latencyMs: 2004, envelope: env(), signals: sig() });
+    const v = run({ token: 'SOL', latencyMs: 2004, envelope: env(), signals: sig() });
     expect(v.reason).toContain('FRESHNESS breached');
     expect(v.reason).not.toContain('(');
   });

@@ -252,7 +252,7 @@ describe('chaos: a dropped tool vetoes, commits to SQLite, and streams', () => {
     expect(res.verdict.decision).toBe('VETOED');
     expect(res.verdict.failedInvariant).toBe('FRESHNESS');
     expect(res.verdict.latencyMs).toBeGreaterThan(1200);
-    expect(res.verdict.invariants.filter((i: any) => i.state === 'NOT_EVALUATED')).toHaveLength(3);
+    expect(res.verdict.invariants.filter((i: any) => i.state === 'NOT_EVALUATED')).toHaveLength(4);
     await post('/api/chaos/toggle', { tool: '*', action: 'RESET' });
   });
 

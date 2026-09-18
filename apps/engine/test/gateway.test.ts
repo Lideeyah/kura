@@ -129,7 +129,7 @@ describe('KURA as an MCP gateway', () => {
     expect(parsed.sizing).toBeNull();
     // Downstream gates were never evaluated — the agent can see the short circuit.
     const skipped = parsed.gates.filter((g: any) => g.state === 'NOT_EVALUATED').map((g: any) => g.id);
-    expect(skipped).toEqual(['ORACLE', 'PROVENANCE', 'EVIDENCE']);
+    expect(skipped).toEqual(['ORACLE', 'PROVENANCE', 'EVIDENCE', 'CONTEXT']);
 
     sup.chaos.set('*', 'RESET');
     expect(await sup.reconnectNow()).toBe(true);
@@ -153,7 +153,7 @@ describe('KURA as an MCP gateway', () => {
     expect(receipt.raw_payload.analyze_token.data_mode).toBe('live');
     expect(receipt.raw_payload.analyze_token.status).toBe('ok');
     expect(receipt.raw_payload.signals.atr_14).toBeGreaterThan(0);
-    expect(receipt.invariants).toHaveLength(4);
+    expect(receipt.invariants).toHaveLength(5);
   });
 
   it('reports an unknown receipt as a tool error rather than inventing one', async () => {
