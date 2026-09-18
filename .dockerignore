@@ -1,0 +1,36 @@
+# Everything not excluded here is copied into the image by `COPY . .` in the build
+# stage, then carried into the runtime stage and pushed to a registry.
+
+# The credential, first and loudest. A built image is pushed to a registry and run on a
+# public host, so a .env baked into it is a published secret, not a local one.
+.env
+.env.*
+!.env.example
+
+# Host node_modules are built for the developer's platform. `COPY . .` runs *after* the
+# Dockerfile copies the deps stage's modules, so without this the macOS build of
+# better-sqlite3 silently overwrites the Linux one compiled against this image's Node
+# ABI — a build that succeeds and a container that cannot open the ledger.
+node_modules
+**/node_modules
+
+# The hash chain belongs to the deployment's mounted volume. Shipping a developer's
+# ledger would start every deploy carrying someone else's blocks.
+*.db
+*.db-wal
+*.db-shm
+
+# Rebuilt inside the image by `npm run build`.
+.next
+**/.next
+
+# Not needed to run the service, and large.
+.git
+.github
+.recording
+*.mp4
+*.pdf
+
+.DS_Store
+npm-debug.log*
+*.log

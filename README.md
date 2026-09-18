@@ -608,6 +608,19 @@ flyctl auth login
 flyctl launch --copy-config --now      # uses the committed fly.toml + Dockerfile
 ```
 
+The image is verifiable without a Fly account, which is worth doing before a deploy:
+
+```bash
+docker build -t kura .
+docker run --rm -p 3000:3000 kura      # console on :3000, engine on :4000 inside
+```
+
+`.dockerignore` keeps `.env` out of the image. That matters more than it looks: the
+build stage is a plain `COPY . .`, the image is pushed to a registry, and a credential
+baked into it is a published one, not a local one. It also excludes host `node_modules`,
+which would otherwise overwrite the Linux build of `better-sqlite3` with the
+developer's own and produce an image that builds and then cannot open the ledger.
+
 The volume mounted at `/data` is what keeps the chain intact across redeploys. The
 deploy runs against the local conformance peer with no credential; to point it at
 production:
