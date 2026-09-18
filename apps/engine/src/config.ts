@@ -160,8 +160,14 @@ export const config = {
   /**
    * Candidate symbols. RYO publishes no supported_tokens tool, so this is the
    * operator's own list rather than something discovered upstream.
+   *
+   * Widening it costs nothing upstream: the autonomous loop evaluates one token per
+   * tick, so the list length changes which token comes next, not how often a call is
+   * made. What it buys is evidence that sizing generalises — the eight below span
+   * 2.78% to 8.9% ATR and produce a monotone spread of allocations, which two
+   * hand-picked symbols cannot demonstrate.
    */
-  watchlist: str('KURA_WATCHLIST', 'SOL,BTC,ETH,AVAX,BNB')
+  watchlist: str('KURA_WATCHLIST', 'SOL,BTC,ETH,BNB,AVAX,LINK,UNI,ARB')
     .split(',')
     .map((s) => s.trim().toUpperCase())
     .filter(Boolean),

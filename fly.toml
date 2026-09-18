@@ -19,7 +19,7 @@ primary_region = "lhr"
   RYO_MCP_ARGS = "tsx apps/engine/src/conformance/server.ts"
   RYO_MCP_URL = "https://app-ryochan.com/api/mcp"
   AUTO_EVALUATE = "0"
-  KURA_WATCHLIST = "SOL,AVAX"
+  KURA_WATCHLIST = "SOL,BTC,ETH,BNB,AVAX,LINK,UNI,ARB"
 
 # The hash chain must outlive a redeploy.
 [[mounts]]

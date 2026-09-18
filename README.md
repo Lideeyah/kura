@@ -157,6 +157,22 @@ multiplier floors above zero because refusing is the gates' job — a multiplier
 would refuse silently, with no invariant recording that it said no. When it binds, it reports
 itself as `clampedBy: MARKET_CONTEXT`, so a reduced position is never mistaken for a computed one.
 
+Measured live against RYO-CHAN, one evaluation per token, unedited:
+
+| Token | ATR(14) | Allocation | Binding constraint |
+| :--- | ---: | ---: | :--- |
+| BTC | 2.78% | 100.000% | risk cap |
+| BNB | 2.90% | 100.000% | risk cap |
+| ETH | 3.90% | 100.000% | risk cap |
+| SOL | 4.11% | 100.000% | risk cap |
+| LINK | 5.23% | 98.850% | volatility |
+| UNI | 7.32% | 88.400% | volatility |
+| ARB | 8.90% | 80.500% | volatility |
+
+Allocation falls monotonically as volatility rises, and the four lowest-ATR assets sit at
+the hard cap rather than being scored apart — the model declines to distinguish between
+degrees of "calm enough", which is the honest answer when the risk cap is what binds.
+
 This is a heuristic volatility-adjusted cap, not a theoretical Kelly proof — see
 [Position sizing](#position-sizing-detail) below for what the model does and does not claim.
 
@@ -210,6 +226,7 @@ anticipated in design:
 | :--- | :--- | :--- |
 | **HTTP 200 with `isError: true`** | Agent parses partial payload; proceeds on bad data | Trapped at the protocol envelope; text pattern-matched before assigning `UPSTREAM_RATE_LIMITED`, otherwise `TOOL_ERROR` |
 | **Silent burst saturation** | Upstream refuses queries despite unspent per-minute quota | Outbound rate-pacer enforces minimum call spacing, excluded from measured latency |
+| **Injected latency erased by our own pacing** | A chaos-injected delay is paced away and never reaches the gate | Pacing resets the latency clock; injected upstream latency is applied after it, so it stays inside the measured window |
 | **Stateless stream disconnects** | Standard MCP clients report fatal `NOT_CONNECTED` | Self-healing connection manager treats HTTP stream resets as ordinary stateless cycles |
 | **Percentage-scale inversion** | Raw ATR percentages (e.g. `4.23`) misparsed as absolute values | Dual-path signal extractor converts percentage and absolute forms separately |
 
