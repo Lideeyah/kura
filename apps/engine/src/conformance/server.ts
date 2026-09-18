@@ -88,12 +88,29 @@ server.registerTool(
   async () => {
     await gate();
     return json(
+      // Shaped to match what live RYO publishes, since the CONTEXT gate reads these
+      // fields: regime at data.regime, fear/greed under data.sentiment, and breadth as
+      // a fraction at data.market.breadth. Breadth sits just above KELLY_BREADTH_REF so
+      // the peer's allocations are unclamped and reproduce the documented figures.
       envelope('market_overview', {}, {
-        totals: { market_cap_usd: 2_410_000_000_000, volume_24h_usd: 84_200_000_000 },
-        dominance: { btc: 54.7 },
-        sentiment: { label: 'neutral', score: 51 },
-        breadth: { advancing: 612, declining: 588 },
-      }, { availability: { totals: 'ok', dominance: 'ok', breadth: 'ok' }, headline: 'Market is range-bound' }),
+        regime: 'risk_on',
+        sentiment: { fear_greed_index: 51.0, label: 'neutral' },
+        market: {
+          total_market_cap_usd: 2_410_000_000_000,
+          total_volume_24h_usd: 84_200_000_000,
+          market_cap_change_24h_pct: 0.42,
+          btc_dominance_pct: 54.7,
+          eth_dominance_pct: 11.2,
+          breadth: 0.51,
+        },
+        top_movers: { gainers: [], losers: [] },
+      }, {
+        availability: {
+          market_regime: 'ok', market_totals: 'ok', market_sentiment: 'ok',
+          market_breadth: 'ok', top_movers: 'ok',
+        },
+        headline: 'Market is range-bound',
+      }),
     );
   },
 );

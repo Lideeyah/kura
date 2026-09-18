@@ -91,6 +91,15 @@ export const config = {
     maxLatencyMs: num('INV_MAX_LATENCY_MS', 1_200),
     /** How stale the `as_of` observation may be before a result is refused. */
     maxAsOfAgeMs: num('INV_MAX_AS_OF_AGE_MS', 300_000),
+    /**
+     * How stale the market-context read may be before the CONTEXT gate refuses.
+     *
+     * This doubles as the context cache TTL. Market regime is not per-token, so one
+     * `market_overview` read serves every token evaluated inside the window: the gate
+     * costs roughly one extra upstream call per window rather than one per evaluation,
+     * which matters against a key whose binding constraint is burst rate.
+     */
+    maxContextAgeMs: num('INV_MAX_CONTEXT_AGE_MS', 60_000),
   },
 
   /** Fractional Kelly sizing parameters (see arbiter/kelly.ts for the derivation). */
@@ -113,6 +122,16 @@ export const config = {
      */
     hyperVolAtrPct: num('KELLY_HYPER_VOL_ATR_PCT', 0.5),
     maxPositionPct: num('KELLY_MAX_POSITION_PCT', 0.05),
+    /**
+     * Market breadth at or above which no context clamp applies. Breadth is the
+     * fraction of the tracked market that is advancing, so 0.5 means "at least half
+     * the market is participating". Below it the position scales down linearly.
+     */
+    breadthRef: num('KELLY_BREADTH_REF', 0.5),
+    /** Floor for the context multiplier, so a narrow market shrinks size but the
+     * refusal decision stays with the gates rather than arriving silently via a
+     * multiplier that reached zero. */
+    minContextMultiplier: num('KELLY_MIN_CONTEXT_MULT', 0.25),
   },
 
   ledger: {

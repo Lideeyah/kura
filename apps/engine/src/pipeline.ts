@@ -4,6 +4,7 @@ import { extractSignals, type SizingSignals } from './arbiter/signals.js';
 import type { FlightRecorder, LedgerRecord } from './ledger/ledger.js';
 import type { InterceptedRyo } from './mcp/interceptor.js';
 import { EngineError } from './mcp/errors.js';
+import type { MarketContextCache } from './mcp/context-cache.js';
 import { completeness, SchemaMismatchError, type RyoEnvelope } from './schema/tools.js';
 
 export interface EvaluationOutcome {
@@ -33,11 +34,17 @@ function faultOf(err: unknown): Fault {
  * If that single call drops, times out, or breaks its schema, the arbiter is handed
  * `envelope: null` plus the structured fault and vetoes synchronously. No LLM is
  * consulted at any point on this path.
+ *
+ * A second tool, `market_overview`, supplies the market context the CONTEXT gate needs.
+ * It is read through a TTL cache because regime is not per-token, and it is awaited
+ * *concurrently* with the token call: the two are independent, and serialising them
+ * would add the context round-trip to every evaluation's wall clock for no reason.
  */
 export async function evaluateToken(
   ryo: InterceptedRyo,
   ledger: FlightRecorder,
   token: { symbol: string },
+  contextCache: MarketContextCache,
 ): Promise<EvaluationOutcome> {
   const symbol = token.symbol;
 
@@ -47,23 +54,41 @@ export async function evaluateToken(
   let fault: Fault | null = null;
   let latencyMs = 0;
 
-  try {
-    const res = await ryo.call('analyze_token', { symbol });
+  const [tokenRead, contextRead] = await Promise.all([
+    ryo
+      .call('analyze_token', { symbol })
+      .then((res) => ({ ok: true as const, res }))
+      .catch((err: unknown) => ({ ok: false as const, err })),
+    contextCache.read(ryo),
+  ]);
+
+  if (tokenRead.ok) {
+    const res = tokenRead.res;
     envelope = res.payload;
     raw = res.raw;
     latencyMs = res.latencyMs;
     signals = extractSignals(envelope, completeness(envelope.availability));
-  } catch (err) {
-    fault = faultOf(err);
-    latencyMs = err instanceof EngineError ? err.latencyMs : 0;
+  } else {
+    fault = faultOf(tokenRead.err);
+    latencyMs = tokenRead.err instanceof EngineError ? tokenRead.err.latencyMs : 0;
   }
 
-  const verdict = evaluate({ token: symbol, latencyMs, envelope, signals, fault });
+  const verdict = evaluate({
+    token: symbol,
+    latencyMs,
+    envelope,
+    signals,
+    fault,
+    context: contextRead.context,
+    contextFault: contextRead.fault,
+  });
 
   const rawPayload = {
     token: symbol,
     analyze_token: raw,
+    market_overview: contextRead.raw,
     fault,
+    context_fault: contextRead.fault,
     signals: signals
       ? {
           price_usd: signals.priceUsd,
@@ -73,7 +98,19 @@ export async function evaluateToken(
           completeness: signals.completeness,
         }
       : null,
-    latency: { analyze_token_ms: round2(latencyMs) },
+    market_context: verdict.context
+      ? {
+          regime: verdict.context.regime,
+          fear_greed: verdict.context.fearGreed,
+          breadth: verdict.context.breadth,
+          read_age_ms: round2(verdict.context.ageMs),
+          from_cache: contextRead.cached,
+        }
+      : null,
+    latency: {
+      analyze_token_ms: round2(latencyMs),
+      market_overview_ms: round2(contextRead.latencyMs),
+    },
   };
 
   const record = ledger.append({

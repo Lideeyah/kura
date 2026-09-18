@@ -1,9 +1,10 @@
 import { config } from '../config.js';
 import { asOfAgeMs, type RyoDataMode, type RyoEnvelope, type RyoStatus } from '../schema/tools.js';
 import { sizePosition, type KellySizing } from './kelly.js';
+import { contextMultiplier, type MarketContext } from './context.js';
 import type { SizingSignals } from './signals.js';
 
-export type InvariantId = 'FRESHNESS' | 'ORACLE' | 'PROVENANCE' | 'EVIDENCE';
+export type InvariantId = 'FRESHNESS' | 'ORACLE' | 'PROVENANCE' | 'EVIDENCE' | 'CONTEXT';
 export type InvariantState = 'PASS' | 'FAIL' | 'NOT_EVALUATED';
 
 export interface InvariantResult {
@@ -26,6 +27,10 @@ export interface ArbiterInput {
   signals: SizingSignals | null;
   /** Structured reason the upstream call failed, if it did. */
   fault?: { code: string; message: string } | null;
+  /** null when the market-context read failed or its breadth was unmeasurable. */
+  context: MarketContext | null;
+  /** Structured reason the market-context read failed, if it did. */
+  contextFault?: { code: string; message: string } | null;
 }
 
 export interface ArbiterVerdict {
@@ -35,6 +40,8 @@ export interface ArbiterVerdict {
   failedInvariant: InvariantId | null;
   invariants: InvariantResult[];
   sizing: KellySizing | null;
+  /** The market context this decision was taken in, for the audit record. */
+  context: MarketContext | null;
   latencyMs: number;
   status: RyoStatus | null;
   dataMode: RyoDataMode | null;
@@ -47,11 +54,18 @@ export interface ArbiterVerdict {
 /**
  * The zero-fallback invariant arbiter.
  *
- * All four gates read the *documented public envelope* — `status`, `data_mode`,
+ * The first four gates read the *documented public envelope* — `status`, `data_mode`,
  * `as_of`, plus measured round-trip and the extracted measurements. That is
  * deliberate: the envelope is the part of the contract RYO publishes and guarantees,
  * so the gate logic never rests on inferred internals that a catalog change could
- * silently invalidate.
+ * silently invalidate. The fifth reads the same envelope fields on a second tool,
+ * `market_overview`, which describes the market rather than the token.
+ *
+ * Note on FRESHNESS and the context read: FRESHNESS bounds the round-trip of the *token*
+ * call, the measurement that actually sizes the position. The context read is bounded
+ * separately, by CONTEXT, on its own age. Folding a slow `market_overview` into the
+ * freshness number would veto a perfectly fresh token read and file the reason under the
+ * wrong gate — each gate reports only what it measured.
  *
  * Properties the test suite asserts:
  *  - Fully synchronous. No promises, no I/O, no model call, no network. It cannot
@@ -64,12 +78,14 @@ export interface ArbiterVerdict {
  */
 export function evaluate(input: ArbiterInput): ArbiterVerdict {
   const t0 = performance.now();
-  const { maxLatencyMs, maxAsOfAgeMs } = config.invariants;
+  const { maxLatencyMs, maxAsOfAgeMs, maxContextAgeMs } = config.invariants;
 
   const freshnessPredicate = `latencyMs <= ${maxLatencyMs} && asOfAgeMs <= ${maxAsOfAgeMs}`;
   const oraclePredicate = "envelope !== null && status === 'ok'";
   const provenancePredicate = "data_mode === 'live'";
   const evidencePredicate = 'price and ATR(14) both measurable';
+  const contextPredicate = `market context live && contextAgeMs <= ${maxContextAgeMs}`;
+  const contextExpected = `status='ok', data_mode='live', read <= ${maxContextAgeMs} ms old`;
 
   const results: InvariantResult[] = [];
   const env = input.envelope;
@@ -95,6 +111,7 @@ export function evaluate(input: ArbiterInput): ArbiterVerdict {
     failedInvariant,
     invariants: results,
     sizing,
+    context: input.context,
     latencyMs: round2(input.latencyMs),
     status: env?.status ?? null,
     dataMode: env?.data_mode ?? null,
@@ -130,6 +147,7 @@ export function evaluate(input: ArbiterInput): ArbiterVerdict {
     results.push(skip('ORACLE', oraclePredicate, "status === 'ok'"));
     results.push(skip('PROVENANCE', provenancePredicate, "data_mode === 'live'"));
     results.push(skip('EVIDENCE', evidencePredicate, 'price and ATR(14) present'));
+    results.push(skip('CONTEXT', contextPredicate, contextExpected));
     // When a fault caused the slow round-trip, name it. "Latency breached" alone sends
     // an operator hunting for a network problem that is really a rate limit.
     const cause = input.fault ? ` (${input.fault.code})` : '';
@@ -158,6 +176,7 @@ export function evaluate(input: ArbiterInput): ArbiterVerdict {
   if (!oracleOk) {
     results.push(skip('PROVENANCE', provenancePredicate, "data_mode === 'live'"));
     results.push(skip('EVIDENCE', evidencePredicate, 'price and ATR(14) present'));
+    results.push(skip('CONTEXT', contextPredicate, contextExpected));
     return finish(
       'ORACLE',
       env === null
@@ -181,6 +200,7 @@ export function evaluate(input: ArbiterInput): ArbiterVerdict {
   });
   if (!provenanceOk) {
     results.push(skip('EVIDENCE', evidencePredicate, 'price and ATR(14) present'));
+    results.push(skip('CONTEXT', contextPredicate, contextExpected));
     return finish('PROVENANCE', `PROVENANCE rejected: data_mode="${env.data_mode}" is not live`, null);
   }
 
@@ -198,14 +218,62 @@ export function evaluate(input: ArbiterInput): ArbiterVerdict {
       : 'price or ATR(14) could not be measured — refusing to substitute zero',
   });
   if (!evidenceOk) {
+    results.push(skip('CONTEXT', contextPredicate, contextExpected));
     return finish('EVIDENCE', 'EVIDENCE FLOOR: required measurements absent — no size computed', null);
   }
 
-  const sizing = sizePosition(signals);
+  // 5 — MARKET CONTEXT. We do not size a position without a live read of the market
+  // it would be taken in. This is a second RYO tool, not a second opinion on the first:
+  // see arbiter/context.ts for why cross-checking the token price would prove nothing.
+  const ctx = input.context;
+  const ctxAgeOk = ctx !== null && ctx.ageMs <= maxContextAgeMs;
+  const contextOk = ctx !== null && ctx.status === 'ok' && ctx.dataMode === 'live' && ctxAgeOk;
+  results.push({
+    id: 'CONTEXT',
+    predicate: contextPredicate,
+    state: contextOk ? 'PASS' : 'FAIL',
+    expected: contextExpected,
+    actual:
+      ctx === null
+        ? `unavailable (${input.contextFault?.code ?? 'NO_CONTEXT'})`
+        : `regime=${ctx.regime ?? 'unlabelled'}, breadth ${round2(ctx.breadth * 100)}%, ` +
+          `status=${ctx.status}, mode=${ctx.dataMode}, read ${round2(ctx.ageMs)} ms ago`,
+    detail:
+      ctx === null
+        ? `no market context: ${input.contextFault?.message ?? 'market_overview produced no usable payload'}`
+        : ctx.status !== 'ok'
+          ? `market context reported status="${ctx.status}"`
+          : ctx.dataMode !== 'live'
+            ? `market context is data_mode="${ctx.dataMode}" — not a live read`
+            : !ctxAgeOk
+              ? `market context is ${round2(ctx.ageMs - maxContextAgeMs)} ms staler than permitted`
+              : 'live market read available, so the position is sized in a known regime',
+  });
+  if (!contextOk) {
+    return finish(
+      'CONTEXT',
+      ctx === null
+        ? `CONTEXT unavailable: ${input.contextFault?.code ?? 'NO_CONTEXT'} — ` +
+          `${input.contextFault?.message ?? 'no market_overview payload'}`
+        : ctx.status !== 'ok'
+          ? `CONTEXT incomplete: market status="${ctx.status}"`
+          : ctx.dataMode !== 'live'
+            ? `CONTEXT rejected: market data_mode="${ctx.dataMode}" is not live`
+            : `CONTEXT stale: market read ${round2(ctx.ageMs)} ms old > ${maxContextAgeMs} ms`,
+      null,
+    );
+  }
+
+  const mult = contextMultiplier(ctx);
+  const sizing = sizePosition(signals, mult);
+  const clamped =
+    sizing.clampedBy === 'MARKET_CONTEXT'
+      ? ` — market breadth ${round2(ctx.breadth * 100)}% scaled the position to ${round2(mult * 100)}% of what the token's own evidence justified`
+      : '';
   return finish(
     null,
-    `all 4 invariants satisfied — illustrative allocation ${sizing.pctOfCap.toFixed(1)}% of cap ` +
-      `(${(sizing.fraction * 100).toFixed(3)}% of bankroll)`,
+    `all 5 invariants satisfied — illustrative allocation ${sizing.pctOfCap.toFixed(1)}% of cap ` +
+      `(${(sizing.fraction * 100).toFixed(3)}% of bankroll)${clamped}`,
     sizing,
   );
 }

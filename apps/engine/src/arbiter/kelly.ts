@@ -16,10 +16,12 @@ export interface KellySizing {
     completenessScore: number;
     confidence: number;
     atrPct: number;
+    /** Market-context multiplier applied after the risk clamps. 1 means unclamped. */
+    contextMultiplier: number;
   };
   /** Allocation as a percentage of the hard risk cap — the headline figure. */
   pctOfCap: number;
-  clampedBy: 'NONE' | 'MAX_POSITION_PCT' | 'NON_POSITIVE_EDGE' | 'HYPER_VOLATILITY';
+  clampedBy: 'NONE' | 'MAX_POSITION_PCT' | 'NON_POSITIVE_EDGE' | 'HYPER_VOLATILITY' | 'MARKET_CONTEXT';
 }
 
 const clamp01 = (n: number) => (n < 0 ? 0 : n > 1 ? 1 : n);
@@ -64,8 +66,14 @@ const clamp01 = (n: number) => (n < 0 ? 0 : n > 1 ? 1 : n);
  * `completeness` may legitimately be null (a tool that declares no availability map).
  * That is treated as zero *confidence contribution*, not as full confidence — an
  * unmeasured section never argues for a bigger position.
+ *
+ * `contextMultiplier` scales the result by market participation (see arbiter/context.ts)
+ * and is applied last, after the risk clamps, so it can only ever shrink a position that
+ * the token's own evidence already justified. It defaults to 1, which leaves the model
+ * exactly as it behaves without a market read — callers that have no context pass
+ * nothing and get the unclamped size.
  */
-export function sizePosition(signals: SizingSignals): KellySizing {
+export function sizePosition(signals: SizingSignals, contextMultiplier = 1): KellySizing {
   const {
     bankrollUsd, fraction: kellyFraction, payoffRatio: b, pMax,
     maxPositionPct, maxAtrPct, hyperVolAtrPct,
@@ -99,6 +107,16 @@ export function sizePosition(signals: SizingSignals): KellySizing {
     clampedBy = 'MAX_POSITION_PCT';
   }
 
+  // Applied after the risk clamps, so a thin market shrinks whatever the token's own
+  // evidence justified rather than competing with it. When it binds it takes over
+  // `clampedBy`: it is now the constraint actually setting the size, and reporting the
+  // superseded cap would misname the reason this position is the size it is.
+  const mult = clamp01(contextMultiplier);
+  if (fraction > 0 && mult < 1) {
+    fraction = fraction * mult;
+    clampedBy = 'MARKET_CONTEXT';
+  }
+
   return {
     p: round(p, 6),
     pBreakEven: round(pMin, 6),
@@ -113,6 +131,7 @@ export function sizePosition(signals: SizingSignals): KellySizing {
       completenessScore: round(completenessScore, 6),
       confidence: round(confidence, 6),
       atrPct: round(signals.atrPct, 6),
+      contextMultiplier: round(mult, 6),
     },
     clampedBy,
   };

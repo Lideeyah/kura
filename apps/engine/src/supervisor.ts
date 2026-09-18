@@ -4,6 +4,7 @@ import { FlightRecorder } from './ledger/ledger.js';
 import { RyoClient, transportSpecFromConfig, type RyoTransportSpec } from './mcp/client.js';
 import { ChaosController, InterceptedRyo } from './mcp/interceptor.js';
 import { evaluateToken, type EvaluationOutcome } from './pipeline.js';
+import { MarketContextCache } from './mcp/context-cache.js';
 import { probeEvidence, type EvidenceProbe } from './arbiter/signals.js';
 import { TOOL_NAMES, type ToolName } from './schema/tools.js';
 
@@ -31,6 +32,8 @@ export class Supervisor {
   private stopped = false;
   private lastConnectError: string | null = null;
   private evidence: EvidenceProbe | null = null;
+  /** One market read serves every token evaluated inside the TTL. */
+  private readonly contextCache = new MarketContextCache();
 
   constructor(spec: RyoTransportSpec = transportSpecFromConfig(), ledgerPath = config.ledger.path) {
     this.ledger = new FlightRecorder(ledgerPath);
@@ -226,7 +229,7 @@ export class Supervisor {
   }
 
   async evaluate(token: WatchToken): Promise<EvaluationOutcome> {
-    return evaluateToken(this.ryo, this.ledger, token);
+    return evaluateToken(this.ryo, this.ledger, token, this.contextCache);
   }
 
   /** The authenticated catalog, which the guide names the final source of truth. */

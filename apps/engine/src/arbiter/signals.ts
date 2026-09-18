@@ -82,7 +82,26 @@ function find(node: unknown, keys: string[], trail = '', depth = 0): Found | nul
   return null;
 }
 
-const findNumber = (node: unknown, keys: string[]): number | null => find(node, keys)?.value ?? null;
+export const findNumber = (node: unknown, keys: string[]): number | null =>
+  find(node, keys)?.value ?? null;
+
+/** String counterpart of `findNumber`, for descriptive fields like the regime label. */
+export function findString(node: unknown, keys: string[], depth = 0): string | null {
+  if (depth > 6 || node === null || typeof node !== 'object') return null;
+  if (!Array.isArray(node)) {
+    const obj = node as Record<string, unknown>;
+    for (const key of keys) {
+      const v = obj[key];
+      if (typeof v === 'string' && v.trim() !== '') return v;
+    }
+  }
+  const children = Array.isArray(node) ? node : Object.values(node as object);
+  for (const child of children) {
+    const found = findString(child, keys, depth + 1);
+    if (found !== null) return found;
+  }
+  return null;
+}
 
 export interface EvidenceProbe {
   resolved: boolean;
