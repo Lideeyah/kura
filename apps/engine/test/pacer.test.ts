@@ -157,3 +157,58 @@ describe('pacing must not be measured as upstream latency', () => {
     expect(await pacer.acquire()).toBe(0);
   });
 });
+
+/**
+ * The two behaviours above interact, and the interaction is what broke.
+ *
+ * Pacing resets the latency clock, because a wait we impose on ourselves is not
+ * upstream staleness. An injected DELAY is the opposite — it stands in for a slow
+ * upstream — so it has to be measured. When the delay was applied *before* the pacer,
+ * the reset erased it: with RYO_MIN_CALL_INTERVAL_MS set, as it is against live RYO,
+ * the chaos lab's latency injection measured single-digit milliseconds and approved
+ * rather than tripping FRESHNESS. Neither behaviour was wrong alone, which is why
+ * nothing caught it.
+ */
+describe('injected latency survives pacing', () => {
+  it('measures an injected delay even when the pacer also slept', async () => {
+    const { InterceptedRyo, ChaosController } = await import('../src/mcp/interceptor.js');
+    const chaos = new ChaosController();
+    chaos.set('analyze_token', 'DELAY', 400);
+
+    // rawCall returns an MCP tool result, so the envelope travels in structuredContent.
+    const client = {
+      rawCall: async () => ({
+        structuredContent: {
+          schema_version: '1.0.0', tool: 'analyze_token', status: 'ok', data_mode: 'live',
+          as_of: new Date().toISOString(), request: { symbol: 'SOL' },
+          data: { market: { price_usd: 172.44 }, technicals: { atr_14: 4.31 } },
+          summary: { headline: 'SOL' }, availability: { market: 'ok' }, warnings: [],
+        },
+      }),
+    } as never;
+
+    // A pacer that genuinely sleeps on the first acquire. Without this the suite's
+    // RYO_MIN_CALL_INTERVAL_MS=0 means no pacing happens, the clock is never reset,
+    // and the test passes against the very ordering it exists to catch.
+    let paced = false;
+    const pacer = {
+      enabled: true,
+      remaining: () => 60,
+      acquire: async () => {
+        if (paced) return 0;
+        paced = true;
+        await new Promise((r) => setTimeout(r, 150));
+        return 150;
+      },
+    } as never;
+
+    const ryo = new InterceptedRyo(client, chaos, pacer);
+    const res = await ryo.call('analyze_token', { symbol: 'SOL' });
+
+    expect(paced).toBe(true);
+    // The injected 400ms must appear in the measured round trip. Pacing's own 150ms
+    // must not: it resets the clock, which is exactly what used to erase the delay.
+    expect(res.latencyMs).toBeGreaterThanOrEqual(390);
+    expect(res.latencyMs).toBeLessThan(540);
+  });
+});

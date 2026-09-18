@@ -134,13 +134,21 @@ export class InterceptedRyo {
   constructor(
     private readonly client: RyoClient,
     readonly chaos: ChaosController,
+    /**
+     * Injectable so a test can exercise a pacer that actually sleeps. The suite pins
+     * RYO_MIN_CALL_INTERVAL_MS=0, which means the configured pacer never waits — and a
+     * pacing bug that only appears when pacing happens cannot be caught without this.
+     */
+    pacer?: RatePacer,
   ) {
-    this.pacer = new RatePacer(
-      config.mcp.ratePerMinute,
-      undefined,
-      undefined,
-      config.mcp.minCallIntervalMs || undefined,
-    );
+    this.pacer =
+      pacer ??
+      new RatePacer(
+        config.mcp.ratePerMinute,
+        undefined,
+        undefined,
+        config.mcp.minCallIntervalMs || undefined,
+      );
   }
 
   get quotaRemaining(): number | null {
@@ -199,6 +207,17 @@ export class InterceptedRyo {
         );
       }
 
+      // Pace before timing: this wait is ours, not the upstream's.
+      const pacedMs = await this.pacer.acquire();
+      if (pacedMs > 0) started = performance.now();
+
+      // Injected latency is applied *after* pacing, and deliberately so. Pacing resets
+      // the latency clock, because a wait we impose on ourselves is not upstream
+      // staleness. An injected DELAY is the opposite: it stands in for a slow upstream,
+      // so it has to land inside the measured window. Sleeping before the pacer meant
+      // the reset erased it — with RYO_MIN_CALL_INTERVAL_MS set, as it is against live
+      // RYO, the chaos lab's latency injection measured ~5 ms and approved instead of
+      // tripping FRESHNESS.
       if (entry?.action === 'DELAY') {
         const delayMs = Math.max(0, entry.delayMs ?? 0);
         // Never sleep past the hard ceiling — surface the timeout instead of hanging.
@@ -212,10 +231,6 @@ export class InterceptedRyo {
           );
         }
       }
-
-      // Pace before timing: this wait is ours, not the upstream's.
-      const pacedMs = await this.pacer.acquire();
-      if (pacedMs > 0) started = performance.now();
 
       // A tool-level rate limit arrives inside an HTTP 200, so the fetch-level retry
       // never sees it. Back off here, on the same full-jitter curve, rather than
