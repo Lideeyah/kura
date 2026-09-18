@@ -60,6 +60,7 @@ Zero private keys. Zero transaction signing. Strictly compliant with **Rule 6.05
 │ • Exponential Backoff     │   ───►    │ 2. ORACLE (status: ok)   │
 │ • Full Jitter Scheduling  │           │ 3. PROVENANCE (Live/Sim) │
 │ • Retry-After Parser      │           │ 4. EVIDENCE (ATR Floor)  │
+│ • Market Context Cache    │           │ 5. CONTEXT (Market Read) │
 └───────────────────────────┘           └────────────┬─────────────┘
                                                      │
                                                      ▼
@@ -67,7 +68,8 @@ Zero private keys. Zero transaction signing. Strictly compliant with **Rule 6.05
                                         │    MATHEMATICAL SIZING   │
                                         │ ──────────────────────── │
                                         │ Volatility-adjusted cap  │
-                                        │ based on parsed ATR-14   │
+                                        │ based on parsed ATR-14,  │
+                                        │ scaled by market breadth │
                                         └────────────┬─────────────┘
                                                      │
                                                      ▼
@@ -96,6 +98,34 @@ Zero private keys. Zero transaction signing. Strictly compliant with **Rule 6.05
 * **`EVIDENCE`** — Enforces verifiable technical indicators. Tokens missing authentic market pricing
   or volatility metrics (`atr_14_pct` or an absolute ATR) fail fast rather than being sized on a
   substituted zero.
+* **`CONTEXT`** — Requires a live, recent `market_overview` read before any position is sized. A
+  token can look perfectly healthy while the market it trades in is unreadable; this refuses to
+  size into a regime KURA cannot see. The read is cached for `INV_MAX_CONTEXT_AGE_MS`, since market
+  regime is not per-token, and the gate bounds the age of that cached read rather than trusting it
+  indefinitely.
+
+##### Why CONTEXT is a second *input*, not a second *opinion*
+
+The obvious fifth gate is cross-verification: read the token's price from a second tool and veto on
+divergence. **That gate would be dishonest here, and it is worth stating why rather than quietly
+not building it.**
+
+Every RYO tool reads one backend. Queried in the same instant, `analyze_token`, `deep_analysis` and
+`compare_tokens` return bit-identical measurements:
+
+```
+analyze_token   ETH  price_usd=2502.4396448801313  atr_14_pct=3.9  rsi_14=55.4
+deep_analysis   ETH  price_usd=2502.4396448801313  atr_14_pct=3.9  rsi_14=55.4
+compare_tokens  ETH  price_usd=2502.4396448801313  atr_14_pct=3.9  rsi_14=55.4
+```
+
+A corroboration gate over those would agree by construction, pass 100% of the time, and let KURA
+advertise an independence property the transport cannot support — the exact class of unearned
+confidence the rest of this system exists to refuse. Two `curl` calls disprove it.
+
+`market_overview` is different in kind: it returns regime, sentiment, breadth and dominance —
+information no token tool carries at all. So CONTEXT asserts something narrow and true: *no position
+is sized without a live read of the market it would be taken in.*
 
 #### 2. Deterministic risk and dynamic volatility sizing
 
@@ -111,6 +141,21 @@ Allocation Cap = f(ATR₁₄)
 * Tokens exhibiting elevated volatility (e.g. AVAX at 11.29% ATR) scale down dynamically
   (51.882% of cap).
 * Hyper-volatile assets (≥ 50% ATR) are clamped to 0% execution allowance.
+
+The result is then scaled by **market breadth** — the fraction of the tracked market advancing,
+read from `market_overview`:
+
+```
+Allocation = f(ATR₁₄) × clamp(breadth / KELLY_BREADTH_REF, KELLY_MIN_CONTEXT_MULT, 1)
+```
+
+At or above the reference breadth the multiplier is exactly 1 and sizing is unchanged; below it the
+position shrinks linearly with participation. Breadth is used rather than the `regime` label
+deliberately: the label is an enum KURA does not own, and mapping a value it has never observed
+would be guesswork, whereas breadth is one number with one meaning and a monotone mapping. The
+multiplier floors above zero because refusing is the gates' job — a multiplier that reached zero
+would refuse silently, with no invariant recording that it said no. When it binds, it reports
+itself as `clampedBy: MARKET_CONTEXT`, so a reduced position is never mistaken for a computed one.
 
 This is a heuristic volatility-adjusted cap, not a theoretical Kelly proof — see
 [Position sizing](#position-sizing-detail) below for what the model does and does not claim.
@@ -172,14 +217,13 @@ anticipated in design:
 
 ### Benchmark Verification
 
-Audited against 128 automated tests across 9 test suites and live network telemetry:
+Audited against 153 automated tests across 10 test suites and live network telemetry:
 
 ```
 ── Invariant gate execution latency ──────────────────────────────────
-   Min gate evaluation            11 µs
-   Median gate evaluation         29 µs
-   Typical warm execution         15 – 160 µs   (full engine pipeline)
-   Cold-start gate evaluation    210 – 500 µs
+   Warm gate evaluation           69 – 140 µs   (25 samples, five gates)
+   Cold-start gate evaluation    350 – 647 µs   (5 fresh engine processes)
+   Live endpoint, observed        112 µs warm / 568 µs cold
 
 ── Cryptographic audit ledger ────────────────────────────────────────
    Storage                        SQLite WAL-mode append-only hash chain
@@ -235,7 +279,7 @@ npm run dev
 ```
 
 ```bash
-# 128 unit, integration and invariant regression tests across 9 suites
+# 153 unit, integration and invariant regression tests across 10 suites
 npm test
 ```
 
@@ -344,7 +388,7 @@ Claude Desktop, Cursor, or any MCP client:
 
 | Tool | What it does |
 |------|--------------|
-| `evaluate_candidate` | Runs the four invariants, commits the verdict, returns APPROVED + bounded size or VETOED + the failing gate, with a receipt id and block hash. |
+| `evaluate_candidate` | Runs the five invariants, commits the verdict, returns APPROVED + bounded size or VETOED + the failing gate, with a receipt id and block hash. |
 | `gate_policy` | The thresholds and sizing parameters in force, so the agent knows the rules before it asks. |
 | `verify_receipt` | Recomputes the hashes for a past decision and re-checks its parent link. |
 | `get_receipt` | The full record, including the canonical raw wire payload the hash covers. |
@@ -516,7 +560,7 @@ one. All parameters are in `.env`.
 ## Tests
 
 ```bash
-npm test                # 103 tests
+npm test                # 153 tests
 npm run typecheck
 ```
 

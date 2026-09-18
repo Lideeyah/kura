@@ -49,7 +49,7 @@ KURA is an MCP gateway. It speaks MCP *client* upstream to RYO-CHAN and MCP *ser
 downstream to your agent, so the agent registers KURA instead of the research tools and
 cannot route around the gate.
 
-Every candidate passes four synchronous TypeScript invariants with **zero LLM calls**.
+Every candidate passes five synchronous TypeScript invariants with **zero LLM calls**.
 Approved candidates get a bounded illustrative risk allocation, expressed as a
 percentage of a hard cap; anything else is halted with the exact failing gate and the
 empirical value that tripped it. Either way
@@ -62,13 +62,18 @@ probabilistic guessing is not.
 
 **Key Features**
 
-1. **Zero-fallback invariant arbiter.** Four gates, evaluated in order, short-circuiting
+1. **Zero-fallback invariant arbiter.** Five gates, evaluated in order, short-circuiting
    on first failure. Fully synchronous — no promises, no I/O, no model call — so it
-   cannot hang on a degraded upstream. Measured at 270–300 µs cold, ~30 µs warm.
+   cannot hang on a degraded upstream. Measured at 350–647 µs cold, 69–140 µs warm.
    - `FRESHNESS` — `latencyMs <= 1200 && asOfAgeMs <= 300_000`
    - `ORACLE` — `status === 'ok'`; `partial` and `unavailable` are refusals
    - `PROVENANCE` — `data_mode === 'live'`; refuses to size on simulated measurement
    - `EVIDENCE` — price and ATR(14) both measurable; a null ATR is a veto, never a 0
+   - `CONTEXT` — a live `market_overview` read, no older than `INV_MAX_CONTEXT_AGE_MS`;
+     market breadth then scales the allocation. This is a second RYO tool, not a second
+     opinion: every RYO tool reads one backend and returns bit-identical measurements for
+     the same symbol, so cross-checking price between tools would agree by construction.
+     `market_overview` carries regime, sentiment and breadth, which no token tool does.
 2. **Cryptographic flight recorder.** `H_n = SHA256(H_{n-1} : H_payload : timestamp :
    decision)`, genesis linked from 64 zeros, committed to WAL SQLite inside a single
    IMMEDIATE transaction so no two blocks can claim the same parent. Scope stated
@@ -166,7 +171,7 @@ wallet anywhere in the repository. Position sizes are research output, not instr
 |---|---|
 | **Github Repository** | https://github.com/RYO-Digital/ryochan-hackathon_repository-249 (mirror: https://github.com/Lideeyah/kura) |
 | **Demo Video** | https://youtu.be/1MMqfDH9mUA — mirror: https://github.com/Lideeyah/kura/raw/main/kura-demo-walkthrough.mp4 |
-| **Documentation** | `README.md` in the repository root — architecture, the four invariants, hash-chain construction, gateway tool reference, API surface, and the resilience benchmark |
+| **Documentation** | `README.md` in the repository root — architecture, the five invariants, hash-chain construction, gateway tool reference, API surface, and the resilience benchmark |
 
 ---
 
@@ -262,7 +267,7 @@ npx kura verify      # walk and verify the entire ledger hash chain
 **Test Command**
 
 ```bash
-npm test                                              # 103 tests, 8 files
+npm test                                              # 153 tests, 10 files
 npm run test:resilience                               # 50 real trials per fault class
 python3 skills/verify_provenance/tool.py --all        # independent chain verification
 python3 skills/verify_provenance/tool.py --all --quiet # summary and failures only
