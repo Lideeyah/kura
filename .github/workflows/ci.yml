@@ -1,0 +1,122 @@
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+  workflow_dispatch:
+
+# Nothing here writes to the repository. Read-only is all it needs.
+permissions:
+  contents: read
+
+concurrency:
+  group: ci-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  verify:
+    name: Verify on Node ${{ matrix.node }}
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        # 20 is the floor the README states as a prerequisite, so it is tested rather
+        # than asserted. 22 is what the published container is closest to.
+        node: ['20', '22']
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: ${{ matrix.node }}
+          cache: npm
+
+      # better-sqlite3 is native; npm 11 defers install scripts, so build it explicitly
+      # and fail here rather than at the first ledger write.
+      - name: Install
+        run: |
+          npm ci
+          npm rebuild better-sqlite3 --foreground-scripts
+          test -f node_modules/better-sqlite3/build/Release/better_sqlite3.node
+
+      - name: Typecheck
+        run: npm run typecheck
+
+      - name: Tests
+        run: npm test
+
+      - name: Build console
+        run: npm run build
+
+      # The end-to-end proof: every claim it prints is checked, and a false one exits
+      # non-zero. This runs against the zero-credential conformance peer, so CI needs
+      # no RYO credential and consumes no quota.
+      - name: End-to-end demonstration
+        run: npm run demo
+
+  image:
+    name: Container builds and serves
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Build image
+        run: docker build -t kura:ci .
+
+      # The deploy path is worth testing: this Dockerfile shipped broken for weeks
+      # because nothing ever built it.
+      - name: Assert the image carries no credential and no ledger
+        run: |
+          docker run --rm --entrypoint sh kura:ci -c '
+            [ -f /app/.env ] && { echo "credential baked into image"; exit 1; }
+            ls /app/*.db >/dev/null 2>&1 && { echo "developer ledger baked into image"; exit 1; }
+            exit 0'
+
+      - name: Run the container
+        run: |
+          docker run -d --name kura-ci -p 3000:3000 \
+            -e PORT=3000 -e ENGINE_PORT=4000 -e ENGINE_ORIGIN=http://127.0.0.1:4000 \
+            -e LEDGER_PATH=/data/kura_flight_recorder.db \
+            -e RYO_MCP_TRANSPORT=stdio -e RYO_MCP_COMMAND=npx \
+            -e RYO_MCP_ARGS="tsx apps/engine/src/conformance/server.ts" \
+            -e AUTO_EVALUATE=0 -e KURA_WATCHLIST=SOL,AVAX \
+            kura:ci
+          for i in $(seq 1 90); do
+            curl -sf -m 2 http://localhost:3000/ >/dev/null 2>&1 && break
+            sleep 2
+          done
+          curl -fsS -o /dev/null http://localhost:3000/app/evaluator
+
+      - name: Evaluate through the containerised engine
+        run: |
+          docker exec kura-ci node -e "
+            const post = (s) => fetch('http://127.0.0.1:4000/api/evaluate', {
+              method: 'POST', headers: { 'content-type': 'application/json' },
+              body: JSON.stringify({ symbol: s }),
+            }).then((r) => r.json());
+            (async () => {
+              const ok = (await post('SOL')).verdict;
+              const bad = (await post('SIMUL')).verdict;
+              console.log(ok.token, ok.decision, '|', bad.token, bad.decision, bad.failedInvariant);
+              if (ok.decision !== 'APPROVED') throw new Error('clean token was not approved');
+              if (bad.failedInvariant !== 'PROVENANCE') throw new Error('simulated data was not refused');
+              if (ok.invariants.length !== 5) throw new Error('expected five invariants');
+            })().catch((e) => { console.error(e.message); process.exit(1); });"
+
+      # Cross-language check: the chain is recomputed by Python, outside the Node
+      # runtime that wrote it, from raw disk state.
+      - name: Verify the hash chain independently
+        run: |
+          docker exec kura-ci sh -c '
+            LEDGER_PATH=/data/kura_flight_recorder.db \
+              python3 skills/verify_provenance/tool.py --all' | tee /tmp/verify.txt
+          grep -q "CHAIN INTACT" /tmp/verify.txt
+
+      - name: Container logs
+        if: always()
+        run: docker logs kura-ci || true
+
+      - name: Stop
+        if: always()
+        run: docker rm -f kura-ci || true

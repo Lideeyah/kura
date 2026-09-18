@@ -190,6 +190,10 @@ describe('injected latency survives pacing', () => {
     // A pacer that genuinely sleeps on the first acquire. Without this the suite's
     // RYO_MIN_CALL_INTERVAL_MS=0 means no pacing happens, the clock is never reset,
     // and the test passes against the very ordering it exists to catch.
+    // Pacing sleeps far longer than the injected delay, so the two outcomes are
+    // separated by a full second rather than by a margin that ordinary scheduler
+    // jitter can cross. Under load a tight window here flakes, and a flaky assertion
+    // about ordering is worse than none.
     let paced = false;
     const pacer = {
       enabled: true,
@@ -197,8 +201,8 @@ describe('injected latency survives pacing', () => {
       acquire: async () => {
         if (paced) return 0;
         paced = true;
-        await new Promise((r) => setTimeout(r, 150));
-        return 150;
+        await new Promise((r) => setTimeout(r, 1_500));
+        return 1_500;
       },
     } as never;
 
@@ -206,9 +210,9 @@ describe('injected latency survives pacing', () => {
     const res = await ryo.call('analyze_token', { symbol: 'SOL' });
 
     expect(paced).toBe(true);
-    // The injected 400ms must appear in the measured round trip. Pacing's own 150ms
-    // must not: it resets the clock, which is exactly what used to erase the delay.
+    // Wrong order erases the delay entirely and lands near 0; counting pacing would
+    // land near 1900. Correct is ~400 plus whatever the fake call costs.
     expect(res.latencyMs).toBeGreaterThanOrEqual(390);
-    expect(res.latencyMs).toBeLessThan(540);
+    expect(res.latencyMs).toBeLessThan(1_200);
   });
 });
